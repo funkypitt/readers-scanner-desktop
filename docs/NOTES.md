@@ -25,7 +25,17 @@ and displayed by the phone, a rename on the phone followed by the desktop.
 - Of the five routes to that scanner, airscan works; escl and hpaio answer « busy » or
   « interrupted » while airscan has just been used. The order tried is the right one.
 
-Still to run on it: a printed stack at 300 dpi (reading, upright), both sides, cancel.
+- One printed sheet at 300 dpi: 19 s, 266 words read, 265 in the PDF's text layer.
+- Cancel (on the glass): NAPS2 scans through a helper process; stopping NAPS2 alone left the
+  helper and our pipe open, and « cancel » came back after 5.7 s. NAPS2 now runs in a process
+  group of its own and the group is signalled (Windows: `taskkill /T`): back in 0.1 s. The
+  scanner then needs a moment: the next scan waited twice on « busy » and took 32 s.
+- The user's own NAPS2 window may be open at the same time (it was, for days): ours are told
+  apart by their process group, never by name.
+
+Still to run on it: **both sides** (asked once with a single sheet in the feeder: one page came,
+where two sides were expected — not understood yet), a sheet fed upside down, a stack of blank
+sheets after the change, cancel in the middle of a stack.
 
 ## NAPS2, as it is driven
 

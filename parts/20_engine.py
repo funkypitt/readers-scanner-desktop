@@ -784,7 +784,9 @@ class Naps2:
         code, words = None, ""
         self._cancelled = False
         try:
-            self.proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=self._env(), **quiet())
+            # a group of its own: NAPS2 scans through a helper process, and « cancel » must reach both
+            own = {"creationflags": 0x08000000 | 0x00000200} if sys.platform == "win32" else {"start_new_session": True}
+            self.proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=self._env(), **own)
             for raw in self.proc.stdout:
                 line = said(raw).strip()
                 m = re.match(r"Scanned page (\d+)", line)
@@ -810,12 +812,20 @@ class Naps2:
         if p is not None:
             self._cancelled = True
             try:
-                if sys.platform == "win32":
-                    p.terminate()      # no signal to send there; NAPS2's worker leaves with its parent
-                else:
-                    p.send_signal(signal.SIGINT)
-                    threading.Timer(3, lambda: p.poll() is None and p.terminate()).start()
-            except OSError:
+                if sys.platform == "win32":    # no signal to send there: NAPS2 and its helper are ended
+                    subprocess.run(["taskkill", "/PID", str(p.pid), "/T", "/F"], capture_output=True, timeout=20, **quiet())
+                else:                          # asked first, then told, the helper with it
+                    group = os.getpgid(p.pid)
+                    os.killpg(group, signal.SIGINT)
+
+                    def insist(how):
+                        try:
+                            p.poll() is None and os.killpg(group, how)
+                        except OSError:
+                            pass
+                    threading.Timer(1.5, insist, (signal.SIGTERM,)).start()
+                    threading.Timer(4, insist, (signal.SIGKILL,)).start()
+            except (OSError, subprocess.SubprocessError):
                 pass
 
 
