@@ -9,7 +9,7 @@ TMP = os.path.realpath(tempfile.mkdtemp(prefix="rs-ui-")).replace("\\", "/")
 SHOTS = sys.argv[1] if len(sys.argv) > 1 else TMP + "/shots"
 os.makedirs(SHOTS, exist_ok=True)
 LANG = os.environ.get("TEST_LANG", "fr_CH.UTF-8")
-os.environ.update(READERS_SCANNER_HOME=TMP, READERS_SCANNER_DRIVER="sane", FAKE_SCANNER=TMP + "/scanner", LANG=LANG, LC_ALL=LANG,
+os.environ.update(READERS_SCANNER_HOME=TMP, READERS_SCANNER_DRIVER="sane", READERS_SCANNER_DIRECT="", FAKE_SCANNER=TMP + "/scanner", LANG=LANG, LC_ALL=LANG,
                   READERS_SCANNER_NAPS2=f"{PY} {HERE}/fake_naps2.py", READERS_SCANNER_SCANIMAGE=f"{PY} {HERE}/fake_scanimage.py")
 if sys.platform != "win32":          # Windows runners have a desktop, and its fonts
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -294,7 +294,8 @@ w.cfg["source"] = "auto"
 os.environ["READERS_SCANNER_NAPS2"] = "/nonexistent/naps2"
 w.naps2 = rs.Naps2(rs.DATA_DIR)
 click(w.scan_button)
-check("without NAPS2: the page that says what it is and where to get it", w.stack.currentWidget() is w.message and w.message.title.text() == _("Reader's Scanner needs NAPS2") and "naps2.com" in w.message.sub.text())
+check("no scanner that answers by itself and no NAPS2: the page that says what to do", wait(lambda: not w.scanning, 20) and w.stack.currentWidget() is w.message
+      and w.message.title.text() == _("no scanner found") and "naps2.com" in w.message.sub.text() and "AirScan" in w.message.sub.text(), w.message.title.text())
 shot(w, "12-naps2-missing")
 w.message_action("naps2")
 check("« get NAPS2 » opens naps2.com", opened[-1].startswith("https://www.naps2.com"))
@@ -305,8 +306,41 @@ QtTest.QTest.keyClick(w.review.name, QtCore.Qt.Key_Return)
 doc4 = w.current
 check("filed and read like a scan", wait(lambda: w.store.get(doc4)["ocr"] == rs.DONE, 90) and w.store.get(doc4)["name"] == "Contrat de bail")
 os.environ["READERS_SCANNER_NAPS2"] = f"{PY} {HERE}/fake_naps2.py"
+scanner(glass="facture-1.jpg")
 w.message_action("again")
-check("NAPS2 installed meanwhile: « look again » finds it", w.naps2.cmd is not None)
+check("NAPS2 installed meanwhile: « look again » finds it and scans", w.naps2.cmd is not None and wait(lambda: w.stack.currentWidget() is w.review and w.session and len(w.session["pages"]) == 1, 40))
+w.discard_session()
+
+# ---- 7b. a scanner that answers by itself: no NAPS2, nothing to install -------------------------
+sys.path.insert(0, HERE)
+import fake_escl
+direct, stop_direct = fake_escl.serve(SC)
+os.environ["READERS_SCANNER_DIRECT"] = direct
+os.environ["READERS_SCANNER_NAPS2"] = "/nonexistent/naps2"
+w.naps2 = rs.Naps2(rs.DATA_DIR)
+w.cfg.pop("device", None)
+t0 = time.time()
+w.find_scanner()
+check("found by itself, in a moment, without NAPS2", wait(lambda: (w.cfg.get("device") or {}).get("routes", [{}])[0].get("backend") == "direct", 10) and time.time() - t0 < 3
+      and w.scanner_line.text() == "HP ScanJet Pro 4500 fn1" and w.naps2.cmd is None, f"{w.scanner_line.text()} {time.time() - t0:.1f} s")
+scanner(feeder=["facture-1.jpg", "facture-2.jpg"])
+w.cfg["source"] = "auto"; w.show_choices()
+click(w.scan_button)
+check("scan: both sheets in the review", wait(lambda: w.stack.currentWidget() is w.review and w.session and len(w.session["pages"]) == 2, 30))
+QtTest.QTest.keyClick(w.review.name, QtCore.Qt.Key_Return)
+doc6 = w.current
+check("Enter: filed, read, named — the same document as through NAPS2", wait(lambda: w.store.get(doc6)["ocr"] == rs.DONE and w.head.text() == "Facture d'électricité", 90)
+      and w.store.text(doc6) == w.store.text(doc1), w.head.text())
+scanner(feeder=["facture-1.jpg"], flags=["jam"])
+click(w.scan_button)
+check("a paper jam: said as the scanner says it", wait(lambda: not w.scanning, 20) and w.message.title.text() == _("paper jam in the scanner"), w.message.title.text())
+stop_direct()
+os.environ["READERS_SCANNER_DIRECT"] = ""
+os.environ["READERS_SCANNER_NAPS2"] = f"{PY} {HERE}/fake_naps2.py"
+w.naps2 = rs.Naps2(rs.DATA_DIR)
+w.cfg.pop("device", None)
+scanner()
+w.find_scanner(); wait(lambda: not w.searching and w.cfg.get("device"), 20)
 
 # ---- 8. the look of the app -----------------------------------------------------------------
 w.open_doc(doc1); wait(lambda: all(p.image is not None for p in w.pages.pictures), 10)

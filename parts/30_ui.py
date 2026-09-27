@@ -732,8 +732,8 @@ class SettingsDialog(QtWidgets.QDialog):
         self.devices = None
         self.fill_scanners()
         naps = main.naps2
-        self.naps = QtWidgets.QLabel(_("NAPS2 %1 — it talks to the scanner", naps.version) if naps.cmd else
-                                     _("NAPS2 is not installed: it is required, it talks to the scanner.") + f' <a href="{NAPS2_URL}">naps2.com</a>')
+        self.naps = QtWidgets.QLabel(_("NAPS2 %1 is here, for the scanners that do not answer by themselves", naps.version) if naps.cmd else
+                                     _("NAPS2 is not installed: only the scanners that do not answer by themselves (AirScan) need it.") + f' <a href="{NAPS2_URL}">naps2.com</a>')
         self.naps.setObjectName("dim"); self.naps.setOpenExternalLinks(True); self.naps.setWordWrap(True)
         form.addRow("", self.naps)
 

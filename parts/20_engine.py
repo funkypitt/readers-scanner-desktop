@@ -616,20 +616,22 @@ def error_text(code, detail=""):
         "busy": _("the scanner is busy"), "cover": _("the scanner's cover is open"), "jam": _("paper jam in the scanner"),
         "warming": _("the scanner is warming up — try again in a moment"), "comm": _("the connection to the scanner was interrupted"),
         "nosane": _("SANE is not installed (the scanner drivers)"), "cancelled": _("scan cancelled"),
-        "nodevice": _("no scanner found — is it switched on?"), "nonaps2": _("NAPS2 is not installed"),
+        "nodevice": _("no scanner found — is it switched on?"), "nonaps2": _("no scanner found"),
+        "multipick": _("two sheets went in together"),
     }.get(code) or (detail or _("the scan did not work"))
 
 
 def _model_key(name):
     """The same scanner reached by several drivers gets the same key."""
-    n = re.sub(r"\([^)]*\)", " ", name.lower().replace("_", " "))
+    n = re.sub(r"\([^)]*\)|\[[^\]]*\]", " ", name.lower().replace("_", " "))
     n = re.sub(r"\b(hewlett[- ]?packard|hp|canon|epson|brother|fujitsu|ricoh|samsung|xerox|kodak|lexmark|kyocera)\b", " ", n)
     return re.sub(r"[^a-z0-9]", "", n) or re.sub(r"[^a-z0-9]", "", name.lower())
 
 
-# driverless first: they work without the maker's software. sane's own « escl » comes last of
-# all: with a stack in the feeder it handed over one page (HP ScanJet Pro 4500 fn1, 2026-09-27).
-_BACKEND_ORDER = ("airscan",)
+# the scanner asked directly first (parts/19_escl.py), then NAPS2's ways to it: the driverless
+# ones, which work without the maker's software. sane's own « escl » comes last of all: with a
+# stack in the feeder it handed over one page (HP ScanJet Pro 4500 fn1, 2026-09-27).
+_BACKEND_ORDER = ("direct", "airscan")
 _BACKEND_LAST = ("escl",)
 
 
@@ -637,6 +639,20 @@ def backend_rank(backend):
     if backend in _BACKEND_ORDER:
         return _BACKEND_ORDER.index(backend)
     return len(_BACKEND_ORDER) + (2 if backend in _BACKEND_LAST else 1)
+
+
+def link_of(way):
+    """"usb" or "net": how this way reaches the scanner."""
+    if way.get("link"):
+        return way["link"]
+    words = f"{way.get('id') or ''} {way.get('name') or ''}".lower()
+    return "usb" if "(usb)" in words or "/usb/" in words or ":usb:" in words or "//localhost" in words or "libusb" in words else "net"
+
+
+def way_order(way):
+    """The app chooses, nobody is asked: a way that failed twice running goes last; then the
+    better driver; then, of two ways by the same driver, the cable before the network."""
+    return (way.get("misses", 0) >= 2, backend_rank(way["backend"]), link_of(way) != "usb")
 
 
 class Naps2:
@@ -650,6 +666,8 @@ class Naps2:
         self._cancelled = False
         self.heard = []                # what NAPS2 wrote during the last scans, for whoever must understand one
         self.alive = 0                 # when the scanner last answered
+        self.direct = None             # the scanner being asked directly, while it scans
+        self.asked_all = False
 
     @staticmethod
     def find():
@@ -712,8 +730,33 @@ class Naps2:
         except (OSError, subprocess.SubprocessError, IndexError):
             return None
 
-    def devices(self):
-        """Every way to every scanner: {"id" (None when only NAPS2 knows it), "name", "backend", "key"}."""
+    def devices(self, every=True):
+        """Every way to every scanner: {"id" (None when only NAPS2 knows it), "name", "backend",
+        "key"}, and "url" for a scanner that can be asked directly. Those are found in a moment;
+        NAPS2's ways take ten seconds and more: with `every` false they are only looked for when
+        no scanner answers by itself."""
+        named = os.environ.get("READERS_SCANNER_DIRECT")
+        if named is not None:              # the tests' scanners, and no others
+            direct = [w for w in (escl_probe(u.strip()) for u in named.split(",") if u.strip()) if w]
+        else:
+            direct = escl_find()
+        direct.sort(key=way_order)
+        self.asked_all = not (direct and not every) and bool(self.cmd)      # were NAPS2's ways looked for too?
+        if not self.asked_all:
+            return direct
+        found = self._devices()
+        if named is None:                  # sane's escl names the address of a network scanner: it can be asked directly too
+            known = {d["url"] for d in direct}
+            for d in found:
+                url = (d.get("id") or "")[5:] if (d.get("id") or "").startswith("escl:http") else None
+                if url and url.rstrip("/") not in known and "localhost" not in url:
+                    way = escl_probe(url.rstrip("/"))
+                    if way and way["uuid"] not in {x["uuid"] for x in direct if x["uuid"]}:
+                        direct.append(way)
+                        known.add(way["url"])
+        return sorted(direct + found, key=way_order)
+
+    def _devices(self):
         found, asked = [], False
         scanimage = os.environ.get("READERS_SCANNER_SCANIMAGE") or shutil.which("scanimage")
         if self.driver == "sane" and scanimage and not self.flatpak:
@@ -751,7 +794,7 @@ class Naps2:
                 pass
             if found:
                 break                  # the usual driver sees it: the others are not asked
-        return sorted(found, key=lambda d: backend_rank(d["backend"]))
+        return sorted(found, key=way_order)
 
     def _profile(self, device, source, pagesize, deskew):
         os.makedirs(self.data, exist_ok=True)
@@ -778,6 +821,16 @@ class Naps2:
 
     def scan(self, device, source, pagesize, out_dir, on_page=None):
         """One scan from one source. Returns (page files, error code or None, NAPS2's words)."""
+        if device.get("url"):
+            self._cancelled = False
+            self.direct = Escl(device["url"])
+            try:
+                self.heard = self.heard[-200:] + [f"--- {source} · direct · {datetime.now():%H:%M:%S}"]
+                files, code, words = self.direct.scan(source, pagesize, out_dir, on_page)
+                self.heard.append(f"{len(files)} page(s) {code or ''} {words}".strip())
+                return ([], "cancelled", "") if self._cancelled else (files, code, words)
+            finally:
+                self.direct = None
         os.makedirs(out_dir, exist_ok=True)
         for f in os.listdir(out_dir):
             remove(os.path.join(out_dir, f))
@@ -820,6 +873,10 @@ class Naps2:
         return [], code or "unknown", words
 
     def cancel(self):
+        direct = self.direct
+        if direct is not None:
+            self._cancelled = True
+            direct.cancel()
         p = self.proc
         if p is not None:
             self._cancelled = True
@@ -856,16 +913,17 @@ def scan_pages(naps2, cfg, source, out_dir, on_page=None, on_state=None):
     glass otherwise; when the scanner does not answer on one driver, the next one is tried, and
     the scanners are looked for again once (an address may have changed). Returns a dict:
     files, source (the one used), error (code) and detail, blank (pages left out), device."""
-    if not naps2.cmd:
-        return {"files": [], "error": "nonaps2", "detail": ""}
     routes = list((cfg.get("device") or {}).get("routes") or [])
-    searched = False
+    if not naps2.cmd:
+        routes = [r for r in routes if r.get("url")]
+    searched = 0                       # 1: the scanners that answer by themselves were looked for; 2: NAPS2's too
     if not routes:
         on_state and on_state("searching")
-        routes = pick_routes(naps2.devices(), None)
-        searched = True
+        found = naps2.devices(every=False)
+        routes = pick_routes(found, None)
+        searched = 2 if naps2.asked_all or not naps2.cmd else 1
         if not routes:
-            return {"files": [], "error": "nodevice", "detail": ""}
+            return {"files": [], "error": "nodevice" if naps2.cmd else "nonaps2", "detail": ""}
     key = routes[0]["key"]
     pagesize = page_size_of(cfg)
     last = ("unknown", "")
@@ -877,10 +935,11 @@ def scan_pages(naps2, cfg, source, out_dir, on_page=None, on_state=None):
             on_state and on_state(src)
             for patience in range(5):      # just after a scan the scanner may still be busy: a moment, not an error
                 files, err, said = naps2.scan(route, src, pagesize, out_dir, on_page)
-                if files or err in ("empty", "busy", "warming", "nofeeder", "noduplex", "cover", "jam"):
+                if files or err in ("empty", "busy", "warming", "nofeeder", "noduplex", "cover", "jam", "multipick"):
                     naps2.alive = time.time()
                 # « offline » from a scanner that answered a minute ago is the same moment of absence
-                moment = err in ("busy", "warming") or (err in ("offline", "comm") and patience == 0 and time.time() - naps2.alive < 90)
+                # (asked directly, a scanner that does not answer is not there: the next way at once)
+                moment = err in ("busy", "warming") or (err in ("offline", "comm") and patience == 0 and time.time() - naps2.alive < 90 and not route.get("url"))
                 if not moment or patience == 4:
                     break
                 on_state and on_state("waiting")
@@ -896,7 +955,7 @@ def scan_pages(naps2, cfg, source, out_dir, on_page=None, on_state=None):
                 # goes behind the others
                 for r in routes:
                     r["misses"] = 0 if r is route else r.get("misses", 0) + (1 if r in missed else 0)
-                routes = sorted(routes, key=lambda r: (r.get("misses", 0) >= 2, backend_rank(r["backend"])))
+                routes = sorted(routes, key=way_order)
                 return {"files": [f for f in files if f not in blank], "blank": blank, "source": src, "error": None,
                         "device": {"key": key, "name": route["name"], "routes": routes}}
             last = (err, said)
@@ -907,12 +966,18 @@ def scan_pages(naps2, cfg, source, out_dir, on_page=None, on_state=None):
             if err in ("empty", "nofeeder", "noduplex", "unknown") and src != "glass":
                 break                          # nothing in the feeder: the glass, when automatic
             if err in ("notfound", "offline", "comm", "driver", "unknown"):
-                if not tries and not searched:
+                while not tries and searched < 2:
+                    # looked for again, once: first those that answer by themselves (a moment), then every way
                     on_state and on_state("searching")
-                    searched = True
-                    again = pick_routes(naps2.devices(), key)
+                    again = pick_routes(naps2.devices(every=searched == 1), key)
+                    searched = 2 if naps2.asked_all or not naps2.cmd else searched + 1
                     tries = [r for r in again if r.get("id") not in {x.get("id") for x in routes} or r.get("id") is None] if again else []
-                    routes = again or routes
+                    for r in again:        # what is known of a way is kept
+                        r["misses"] = next((x.get("misses", 0) for x in routes if x.get("id") == r.get("id") and r.get("id")), 0)
+                    # every way looked for: what is not found any more is forgotten; after the quick
+                    # look, NAPS2's ways, which it did not ask, stay
+                    kept = [x for x in routes if not x.get("url") and x.get("id") not in {r.get("id") for r in again}] if searched == 1 else []
+                    routes = (again + kept) if again else routes
                 continue
             return {"files": [], "error": err, "detail": said, "source": src}
         else:

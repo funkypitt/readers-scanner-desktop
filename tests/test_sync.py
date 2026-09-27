@@ -7,7 +7,7 @@ import glob, json, os, shutil, socket, subprocess, sys, tempfile, time
 HERE = os.path.dirname(os.path.abspath(__file__)).replace("\\", "/")
 PY = sys.executable.replace("\\", "/")
 TMP = os.path.realpath(tempfile.mkdtemp(prefix="rs-sync-")).replace("\\", "/")
-os.environ.update(READERS_SCANNER_HOME=TMP, READERS_SCANNER_DRIVER="sane", LANG="en_US.UTF-8", LC_ALL="en_US.UTF-8")
+os.environ.update(READERS_SCANNER_HOME=TMP, READERS_SCANNER_DRIVER="sane", READERS_SCANNER_DIRECT="", LANG="en_US.UTF-8", LC_ALL="en_US.UTF-8")
 sys.path.insert(0, os.path.dirname(HERE))
 sys.stdout.reconfigure(encoding="utf-8", line_buffering=True)
 import faulthandler

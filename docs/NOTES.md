@@ -37,10 +37,46 @@ Still to run on it: **both sides** (asked once with a single sheet in the feeder
 where two sides were expected — not understood yet), a sheet fed upside down, a stack of blank
 sheets after the change, cancel in the middle of a stack.
 
+## The scanner asked directly (since 2026-09-27, the first choice)
+
+Decided with the user after the first day on the real scanner: NAPS2 had been his suggestion,
+and the day showed what four layers cost (the app → NAPS2 → SANE → a driver → the scanner): a
+page lost somewhere in them, sentences to be recognised in 46 languages, ten seconds to find a
+scanner. Most scanners made since about 2015 speak eSCL (AirScan, Mopria): HTTP and a little
+XML. `parts/19_escl.py` asks them directly; NAPS2 stays for the others.
+
+Measured on the HP ScanJet Pro 4500 fn1, the same day, directly against through NAPS2: found in
+0.03 s against 12 s; the glass at 300 dpi in 6.3 s against 10.6 s; the empty feeder known at
+once against 2.5 s; a scan right after another in 14.7 s against 26–32 s.
+
+- The scanner says whether its feeder is loaded (`AdfState`) before anything moves: « automatic »
+  no longer tries the feeder to learn that it is empty. It names a jam, an open cover, two
+  sheets taken together, as codes.
+- Its pages come one by one (`NextDocument` until 404); cancelling is a DELETE of the job.
+- The address it gives for a job may be one only it knows (`http://ScanjetPro4500.local./…`):
+  only its path is kept.
+- It does not always write the resolution in the JPEG: `_stamp` writes it in the file's header,
+  the picture untouched (the PDF's page size comes from it).
+- Found: over USB through ipp-usb, which listens on this computer (ports 60000 and up, asked
+  one by one: an instant); on the network by mDNS (`zeroconf`), three seconds. A scanner
+  plugged in and on the network is found twice: two ways to one scanner.
+- **Nobody is asked to choose a driver** (the user: « I hate that most scanner apps on Linux list
+  ALL drivers »). `way_order`: a way that failed twice running last; then the better driver
+  (the scanner itself, airscan, the makers', and sane's own escl last); then the cable before
+  the network. A way asked directly that does not answer is known in a moment and the next
+  one is taken: a cable pulled out costs nothing.
+- Looking again, when no remembered way answers, is done in two stages: those that answer by
+  themselves (3 s), then every way NAPS2 knows (15 s here).
+- `READERS_SCANNER_DIRECT` (addresses, or empty for none) replaces the search in the tests:
+  without it they would find the real scanner on the desk.
+
+Not yet run directly on the real scanner: a stack in the feeder, both sides, cancel.
+
 ## NAPS2, as it is driven
 
-- NAPS2 **is required and is not shipped**. It is said in the README, the package description,
-  the desktop entry, the first screen when it is missing (with « get NAPS2 »), and the settings.
+- NAPS2 is **needed only by the scanners that cannot be asked directly**, and is not shipped.
+  It is said in the README, the package description, the installer, the screen shown when no
+  scanner is found (with « get NAPS2 »), and the settings.
 - `naps2 console` always exits 0; what went wrong is a sentence on stdout, in the system's
   language → it is run with `LC_ALL=en_US.UTF-8 LANGUAGE=en` and the sentences are matched
   (`_ERRORS` in `parts/20_engine.py`).

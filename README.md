@@ -1,9 +1,10 @@
 # Reader's Scanner (desktop)
 
-> **Requires [NAPS2](https://www.naps2.com/download)** (free, open source) to drive the scanner.
-> It is not installed with the app: get it from naps2.com (`.deb`, `.rpm`, Flatpak, Windows,
-> macOS). Without it Reader's Scanner still files the pictures and PDFs you hand it, but cannot scan.
-
+> **Most scanners need nothing else.** Those made since about 2015 (AirScan, Mopria, eSCL) are
+> asked directly, on the network or by USB. **The others need [NAPS2](https://www.naps2.com/download)**
+> (free, open source), which is not installed with the app: on Linux it reaches them through
+> SANE, on Windows through WIA or TWAIN, on macOS through Apple's drivers.
+>
 > **State (2026-09-27): not released yet.** Tested against a stand-in for the scanner and, in
 > part, on one real scanner (HP ScanJet Pro 4500 fn1, Linux). See [docs/NOTES.md](docs/NOTES.md).
 
@@ -16,8 +17,10 @@ no account with the app, nothing leaves your computer except to your own WebDAV 
 
 - **Two actions for a document**: *scan* (or Ctrl+N), then Enter — or a click on the folder it
   belongs to. A name is optional: without one, the first words read on the page.
-- **Nothing to set up for a scan.** The scanner is found by itself and remembered. « automatic »
-  takes the feeder when sheets are in it, the glass otherwise. 300 dpi colour, straightened.
+- **Nothing to set up for a scan, and nothing to choose.** The scanner is found by itself and
+  remembered; of the ways to reach it, the app takes the best one that answers — the scanner
+  itself before any driver, the cable before the network — and the next one when it stops
+  answering. « automatic » takes the feeder when sheets are in it, the glass otherwise. 300 dpi colour, straightened.
   From the feeder, blank sheets and blank backs are left out (and can be put back); sheets fed upside down
   are set upright.
 - **The text is read on this computer** (Tesseract), in the language chosen under the button;
@@ -37,16 +40,18 @@ More detail: [docs/NOTES.md](docs/NOTES.md).
 
 ## Install
 
-**First NAPS2**: <https://www.naps2.com/download> (Debian/Ubuntu: its `.deb`; others: Flatpak
-`com.naps2.Naps2`; Arch: `naps2-bin` from the AUR).
+NAPS2, **only if your scanner is not found by itself**: <https://www.naps2.com/download>
+(Debian/Ubuntu: its `.deb`; others: Flatpak `com.naps2.Naps2`; Arch: `naps2-bin` from the AUR).
+A scanner plugged in by USB is asked directly on Linux when `ipp-usb` is installed (it is, on
+most distributions).
 
 - Debian, Ubuntu, Pop!_OS: add the [apt repository](https://funkypitt.github.io/apt-repo/), then `sudo apt install readers-scanner`. Or take the `.deb` from the [latest release](https://github.com/funkypitt/readers-scanner-desktop/releases/latest): `sudo apt install ./readers-scanner_*_all.deb`. Tesseract and poppler come with it.
 - Arch, Manjaro: `git clone https://github.com/funkypitt/readers-scanner-desktop && cd readers-scanner-desktop/packaging && makepkg -si`.
-- Windows: `readers-scanner_…_windows_x64_setup.exe` from the latest release. It installs for you alone, without administrator rights. NAPS2 for Windows: the installer from naps2.com.
-- macOS: the `.dmg` from the latest release, `apple-silicon` or `intel`; drag the app to Applications. NAPS2 for macOS: the `.pkg` from naps2.com.
-- Anywhere else: `python3 readers_scanner.py` with PyQt5, requests, Pillow and numpy installed, and `tesseract` and `pdftoppm` (poppler) on the path — or `pip install pypdfium2` in place of poppler.
+- Windows: `readers-scanner_…_windows_x64_setup.exe` from the latest release. It installs for you alone, without administrator rights.
+- macOS: the `.dmg` from the latest release, `apple-silicon` or `intel`; drag the app to Applications.
+- Anywhere else: `python3 readers_scanner.py` with PyQt5, requests, Pillow, numpy and zeroconf installed, and `tesseract` and `pdftoppm` (poppler) on the path — or `pip install pypdfium2` in place of poppler.
 
-The Windows and macOS builds carry their own Tesseract; nothing else to install but NAPS2. They
+The Windows and macOS builds carry their own Tesseract. They
 are not signed. Windows: *More info* › *Run anyway*. macOS: open the app once, then *System
 Settings* › *Privacy & Security* › *Open Anyway* (before macOS 15: right click on the app › *Open*).
 
@@ -66,15 +71,15 @@ The Windows installer, the two macOS disk images and the .deb are built by GitHu
 `tools/bundle_tesseract.py` gathers the Tesseract they carry; `tools/naps2_messages.py` rewrites
 the table of what NAPS2 says in its 46 languages (on Windows it answers in the system's).
 
-The tests use a stand-in for NAPS2 (`tests/fake_naps2.py`) and pages drawn for the purpose; they
-need no scanner.
+The tests use stand-ins — a scanner that answers by itself (`tests/fake_escl.py`), NAPS2
+(`tests/fake_naps2.py`) — and pages drawn for the purpose; they need no scanner.
 
 ## Crédits / Credits
 
 © 2026 Pierre Gallaz. Développé avec [Claude Code](https://claude.com/claude-code) (Anthropic).
-Licence MIT, voir `LICENSE`. L'acquisition est faite par [NAPS2](https://www.naps2.com) (GPL 2),
+Licence MIT, voir `LICENSE`. Les scanners qui ne répondent pas d'eux-mêmes sont pilotés par [NAPS2](https://www.naps2.com) (GPL 2),
 lancé comme programme séparé ; la lecture par [Tesseract](https://github.com/tesseract-ocr/tesseract) (Apache 2.0).
 
 © 2026 Pierre Gallaz. Developed with [Claude Code](https://claude.com/claude-code) (Anthropic).
-MIT licence, see `LICENSE`. Acquisition by [NAPS2](https://www.naps2.com) (GPL 2), run as a
+MIT licence, see `LICENSE`. Scanners that do not answer by themselves are driven by [NAPS2](https://www.naps2.com) (GPL 2), run as a
 separate program; reading by [Tesseract](https://github.com/tesseract-ocr/tesseract) (Apache 2.0).

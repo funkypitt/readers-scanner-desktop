@@ -6,7 +6,7 @@ import os, shutil, subprocess, sys, tempfile, time
 HERE = os.path.dirname(os.path.abspath(__file__)).replace("\\", "/")
 PY = sys.executable.replace("\\", "/")
 TMP = os.path.realpath(tempfile.mkdtemp(prefix="rs-test-")).replace("\\", "/")
-os.environ.update(READERS_SCANNER_HOME=TMP, READERS_SCANNER_DRIVER="sane", FAKE_SCANNER=TMP + "/scanner", LANG="en_US.UTF-8", LC_ALL="en_US.UTF-8",
+os.environ.update(READERS_SCANNER_HOME=TMP, READERS_SCANNER_DRIVER="sane", READERS_SCANNER_DIRECT="", FAKE_SCANNER=TMP + "/scanner", LANG="en_US.UTF-8", LC_ALL="en_US.UTF-8",
                   READERS_SCANNER_NAPS2=f"{PY} {HERE}/fake_naps2.py", READERS_SCANNER_SCANIMAGE=f"{PY} {HERE}/fake_scanimage.py")
 sys.path.insert(0, os.path.dirname(HERE))
 sys.stdout.reconfigure(encoding="utf-8", line_buffering=True)
@@ -154,8 +154,103 @@ check("cancel stops the scan", r["error"] == "cancelled", str(r))
 
 os.environ["READERS_SCANNER_NAPS2"] = "/nonexistent/naps2"
 missing = rs.Naps2(rs.DATA_DIR)
-check("NAPS2 absent: known, nothing crashes", missing.version is None and rs.scan_pages(missing, cfg, "auto", out)["error"] in ("driver", "unknown", "offline", "nonaps2"))
+check("NAPS2 absent and no scanner that answers by itself: said so", missing.version is None and rs.scan_pages(missing, cfg, "auto", out)["error"] == "nonaps2")
 os.environ["READERS_SCANNER_NAPS2"] = f"{PY} {HERE}/fake_naps2.py"
+
+# --- the scanner asked directly (eSCL) -----------------------------------------------------
+sys.path.insert(0, HERE)
+import fake_escl
+scanner(feeder=["facture-1.jpg", "facture-2.jpg"], glass="contrat.jpg")
+url, stop = fake_escl.serve(SC)
+os.environ["READERS_SCANNER_DIRECT"] = url
+
+
+def asked():
+    try:
+        return open(SC + "/direct.txt").read().splitlines()
+    except OSError:
+        return []
+
+
+d = rs.Naps2(TMP + "/direct")
+t0 = time.time()
+ways = d.devices(every=False)
+check("a scanner that answers by itself is found at once, and NAPS2 is not asked", [(x["backend"], x["name"], x["feeder"], x["duplex"]) for x in ways] == [("direct", "HP ScanJet Pro 4500 fn1", True, True)]
+      and time.time() - t0 < 2 and [l for l in log() if l != "--help"] == [], f"{ways} {log()}")
+ways = d.devices()
+check("with NAPS2's ways behind it, one scanner all the same", [x["backend"] for x in ways] == ["direct", "airscan", "hpaio", "escl"] and len({x["key"] for x in ways}) == 1, str([(x["backend"], x["key"]) for x in ways]))
+seen = []
+known = {"format": "a"}
+scanner(feeder=["facture-1.jpg", "facture-2.jpg"], glass="contrat.jpg")
+r = rs.scan_pages(d, known, "auto", out, on_page=seen.append)
+check("automatic: the scanner says its feeder is loaded → both sheets, as they come", r["error"] is None and r["source"] == "feeder" and seen == [1, 2]
+      and [Image.open(f).size for f in r["files"]] == [(2480, 3508)] * 2 and [Image.open(f).info.get("dpi") for f in r["files"]] == [(300, 300)] * 2, f"{r} {seen}")
+check("asked in its own words: the feeder, one side, 300 dpi; its job's address made ours", "POST /eSCL/ScanJobs Feeder 300" in asked() and any(a.startswith("GET /eSCL/ScanJobs/15/NextDocument") for a in asked()), str(asked()))
+check("NAPS2 had no part in it", [l for l in log() if l != "--help"] == [] and r["device"]["routes"][0]["backend"] == "direct", str(log()))
+known["device"] = r["device"]
+scanner(glass="contrat.jpg")
+t0 = time.time()
+r = rs.scan_pages(d, known, "auto", out)
+check("automatic: it says its feeder is empty → the glass, without trying the feeder", r["error"] is None and r["source"] == "glass" and len(r["files"]) == 1
+      and not any("Feeder" in a for a in asked()), f"{r} {asked()}")
+scanner()
+t0 = time.time()
+r = rs.scan_pages(d, known, "feeder", out)
+check("feeder asked, feeder empty → said at once", r["error"] == "empty" and time.time() - t0 < 1, f"{r} {time.time() - t0:.2f}")
+scanner(feeder=["facture-1.jpg", "blank.jpg", "facture-2.jpg", "blank-showthrough.jpg"])
+r = rs.scan_pages(d, known, "duplex", out)
+check("both sides: asked as such, the blank backs left out", r["error"] is None and len(r["files"]) == 2 and len(r["blank"]) == 2 and "POST /eSCL/ScanJobs Feeder duplex 300" in asked(), f"{r} {asked()}")
+scanner(feeder=["facture-1.jpg"])
+open(SC + "/busy", "w").write("2")
+r = rs.scan_pages(d, known, "auto", out)
+check("busy with the scan before: waited for", r["error"] is None and len(r["files"]) == 1 and sum(a.startswith("POST") for a in asked()) == 3, f"{r} {asked()}")
+for flag, word, text in (("jam", "jam", "paper jam in the scanner"), ("multipick", "multipick", "two sheets went in together")):
+    scanner(feeder=["facture-1.jpg"], flags=[flag])
+    r = rs.scan_pages(d, known, "auto", out)
+    check(f"the scanner says « {flag} »: said in words, nothing scanned", r["error"] == word and rs.error_text(word) == text and not any(a.startswith("POST") for a in asked()), f"{r}")
+scanner(glass="contrat.jpg", flags=["nofeeder"])
+d2 = rs.Naps2(TMP + "/direct2")
+r = rs.scan_pages(d2, {"format": "a"}, "auto", out)
+check("a scanner without feeder: the glass", r["error"] is None and r["source"] == "glass" and r["device"]["routes"][0]["feeder"] is False, str(r))
+scanner(feeder=["facture-1.jpg"] * 5)
+open(SC + "/slow", "w").write("0.4")
+threading_timer = __import__("threading").Timer(0.9, d.cancel)
+threading_timer.start()
+t0 = time.time()
+r = rs.scan_pages(d, known, "feeder", out)
+check("cancel: the scanner is told, the sheets not yet taken stay in the feeder", r["error"] == "cancelled" and any(a.startswith("DELETE /eSCL/ScanJobs/") for a in asked())
+      and 1 <= len(os.listdir(SC + "/feeder")) <= 4 and time.time() - t0 < 3, f"{r} {asked()[-3:]} {os.listdir(SC + '/feeder')}")
+# plugged in and on the network: two ways to one scanner
+cable = url.replace("127.0.0.1", "localhost")
+os.environ["READERS_SCANNER_DIRECT"] = f"{url},{cable}"
+both = rs.Naps2(TMP + "/both")
+ways = both.devices(every=False)
+check("by cable and by the network: one scanner, the cable first", [(x["link"], x["url"]) for x in ways] == [("usb", cable), ("net", url)] and len({x["key"] for x in ways}) == 1, str(ways))
+scanner(feeder=["facture-1.jpg"])
+r = rs.scan_pages(both, {"format": "a"}, "auto", out)
+check("the scan goes by the cable", r["error"] is None and r["device"]["routes"][0]["link"] == "usb" and len(r["device"]["routes"]) == 2, str(r.get("device")))
+stale = dict(r["device"], routes=[dict(r["device"]["routes"][0], url="http://localhost:9", id="http://localhost:9")] + r["device"]["routes"][1:])
+scanner(feeder=["facture-1.jpg"])
+t0 = time.time()
+r = rs.scan_pages(both, {"format": "a", "device": stale}, "auto", out)
+check("the cable pulled out: known in a moment, the scan goes by the network", r["error"] is None and len(r["files"]) == 1 and time.time() - t0 < 3
+      and [x["misses"] for x in r["device"]["routes"]] == [1, 0], f"{r.get('device')} {time.time() - t0:.1f} s")
+scanner(feeder=["facture-1.jpg"])
+r = rs.scan_pages(both, {"format": "a", "device": r["device"]}, "auto", out)
+check("twice running: the network goes first from now on", r["error"] is None and [x["link"] for x in r["device"]["routes"]] == ["net", "usb"], str(r.get("device")))
+os.environ["READERS_SCANNER_DIRECT"] = url
+os.environ["READERS_SCANNER_NAPS2"] = "/nonexistent/naps2"
+alone = rs.Naps2(TMP + "/alone")
+scanner(feeder=["facture-1.jpg"])
+r = rs.scan_pages(alone, {"format": "a"}, "auto", out)
+check("without NAPS2 at all: a scanner that answers by itself scans", alone.cmd is None and r["error"] is None and len(r["files"]) == 1, str(r))
+os.environ["READERS_SCANNER_NAPS2"] = f"{PY} {HERE}/fake_naps2.py"
+stop()
+scanner(feeder=["facture-1.jpg"])
+d.alive = 0
+r = rs.scan_pages(d, known, "auto", out)
+check("it no longer answers at its address: NAPS2's ways are looked for, and the scan is made", r["error"] is None and len(r["files"]) == 1 and any("--listdevices" in l or "-p readers-scanner" in l for l in log()), f"{r} {log()}")
+os.environ["READERS_SCANNER_DIRECT"] = ""
 
 # --- as on Windows and macOS ---------------------------------------------------------------
 # no SANE there: NAPS2 lists the scanners by name, one driver after the other, and on Windows

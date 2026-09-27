@@ -7,7 +7,7 @@
 # On every system: the three test suites (engine, window, sync), then the build, then the built
 # app's own --self-test (it reads a page, writes its PDF, shows it, opens the window), then the
 # same once the real NAPS2 is installed on the runner. No runner has a scanner: what a scan does
-# with a real one is tested with the stand-in of tests/fake_naps2.py.
+# with a real one is tested with the stand-ins of tests/fake_escl.py and tests/fake_naps2.py.
 #
 # Windows and macOS carry their own Tesseract (conda-forge's build, gathered by
 # tools/bundle_tesseract.py) and pdfium; the .deb depends on the distribution's.
@@ -69,7 +69,7 @@ jobs:
         shell: bash
         run: |
           python -m pip install --upgrade pip
-          pip install "PyQt5==5.15.11" requests pillow numpy pypdfium2 pyinstaller pefile wsgidav cheroot
+          pip install "PyQt5==5.15.11" requests pillow numpy pypdfium2 zeroconf pyinstaller pefile wsgidav cheroot
 
       - name: Tesseract to carry, poppler for the tests
         uses: mamba-org/setup-micromamba@v2
@@ -129,7 +129,7 @@ jobs:
             --icon packaging/readers-scanner.ico \
             --add-data "packaging/readers-scanner.png;." \
             --add-data "bundle/tesseract;tesseract" \
-            --collect-all pypdfium2 --collect-all pypdfium2_raw \
+            --collect-all pypdfium2 --collect-all pypdfium2_raw --collect-submodules zeroconf \
             readers_scanner.py
           du -sh "dist/Readers Scanner"
           command -v iscc >/dev/null || choco install innosetup -y --no-progress
@@ -179,7 +179,7 @@ jobs:
             --osx-bundle-identifier ch.gallaz.readersscanner \
             --add-data "packaging/readers-scanner.png:." \
             --add-data "bundle/tesseract:tesseract" \
-            --collect-all pypdfium2 --collect-all pypdfium2_raw \
+            --collect-all pypdfium2 --collect-all pypdfium2_raw --collect-submodules zeroconf \
             readers_scanner.py
           # Ad hoc signature: on Apple Silicon an unsigned binary does not start at all.
           codesign --force --deep --sign - "dist/Readers Scanner.app"
@@ -264,7 +264,7 @@ jobs:
       - name: What the package depends on, and the tests' tools
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq fakeroot python3-pyqt5 python3-requests python3-pil python3-numpy tesseract-ocr tesseract-ocr-fra poppler-utils python3-venv
+          sudo apt-get install -y -qq fakeroot python3-pyqt5 python3-requests python3-pil python3-numpy python3-zeroconf tesseract-ocr tesseract-ocr-fra poppler-utils python3-venv
           python3 -m venv "$RUNNER_TEMP/dav"
           "$RUNNER_TEMP/dav/bin/pip" install -q wsgidav cheroot
 
@@ -284,7 +284,7 @@ jobs:
       - name: Does it install, and does what is installed work?
         run: |
           sudo apt-get install -y -qq ./out/readers-scanner_${VERSION}_all.deb
-          export QT_QPA_PLATFORM=offscreen READERS_SCANNER_HOME="$RUNNER_TEMP/self"
+          export QT_QPA_PLATFORM=offscreen READERS_SCANNER_HOME="$RUNNER_TEMP/self" READERS_SCANNER_NEEDS_ZEROCONF=1
           readers-scanner --self-test -
           readers-scanner &
           PID=$!

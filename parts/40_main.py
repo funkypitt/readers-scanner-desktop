@@ -216,7 +216,7 @@ class Main(QtWidgets.QMainWindow):
         self.update_status()
         if self.configured():
             QtCore.QTimer.singleShot(0, self.sync)
-        if self.naps2.cmd and not self.cfg.get("device"):
+        if not self.cfg.get("device"):
             QtCore.QTimer.singleShot(0, self.find_scanner)
 
     def configured(self):
@@ -537,9 +537,7 @@ class Main(QtWidgets.QMainWindow):
 
     def welcome(self):
         self.current = None
-        if not self.naps2.cmd:
-            self.naps2_page()
-        elif self.store.count() == 0:
+        if self.store.count() == 0:
             self.say(_("put the pages on the scanner, press « scan »"),
                      _("In the feeder or on the glass: the scanner takes what it finds. The text is read on this computer, and the document becomes a PDF you can search."),
                      (("scan", _("scan")), ("import", _("from files…"))))
@@ -547,9 +545,11 @@ class Main(QtWidgets.QMainWindow):
             self.say(_("scan, or choose a document"), "", (("scan", _("scan")),))
 
     def naps2_page(self):
-        self.say(_("Reader's Scanner needs NAPS2"),
-                 _("NAPS2 is the free program that talks to the scanner. It is installed separately, from naps2.com. Once it is there, « look again »; pictures and PDFs can be brought in from files meanwhile."),
-                 (("naps2", _("get NAPS2")), ("again", _("look again")), ("import", _("from files…"))))
+        """No scanner answers by itself and NAPS2, which knows the others, is not there."""
+        self.say(_("no scanner found"),
+                 _("Most scanners made since 2015 (AirScan, Mopria) are found by themselves, on the network or by USB: is yours switched on? "
+                   "The others need NAPS2, a free program installed separately, from naps2.com. Pictures and PDFs can be brought in from files meanwhile."),
+                 (("again", _("look again")), ("naps2", _("get NAPS2")), ("import", _("from files…"))))
 
     def message_action(self, key):
         if key == "scan":
@@ -564,12 +564,7 @@ class Main(QtWidgets.QMainWindow):
             QtGui.QDesktopServices.openUrl(QtCore.QUrl(NAPS2_URL))
         elif key == "again":
             self.naps2 = Naps2(DATA_DIR)
-            if self.naps2.cmd:
-                self.welcome()
-                if not self.cfg.get("device"):
-                    self.find_scanner()
-            else:
-                self.naps2_page()
+            self.scan()
         elif key == "review":
             self.show_review()
 
@@ -869,7 +864,7 @@ class Main(QtWidgets.QMainWindow):
     # ---- scanning ----------------------------------------------------------------------
 
     def find_scanner(self):
-        if self.searching or not self.naps2.cmd:
+        if self.searching:
             return
         self.searching = True
         self.update_status()
@@ -882,17 +877,14 @@ class Main(QtWidgets.QMainWindow):
                 save_config(self.cfg)
             self.update_status()
 
-        self.run(lambda say: self.naps2.devices(), found, lambda m: found([]))
+        self.run(lambda say: self.naps2.devices(every=False), found, lambda m: found([]))
 
     def scan(self):
         if self.scanning:
             self.cancel_scan()
             return
         if not self.naps2.cmd:
-            self.naps2 = Naps2(DATA_DIR)
-            if not self.naps2.cmd:
-                self.naps2_page()
-                return
+            self.naps2 = Naps2(DATA_DIR)   # installed meanwhile, perhaps
         self.scanning = True
         self.trouble = ""
         self.scan_button.setText(_("cancel"))
@@ -1255,9 +1247,7 @@ class Main(QtWidgets.QMainWindow):
 
     def update_status(self):
         device = (self.cfg.get("device") or {}).get("name")
-        if not self.naps2.cmd:
-            scanner = _("NAPS2 is not installed")
-        elif self.searching:
+        if self.searching:
             scanner = _("looking for the scanner…")
         elif device:
             scanner = re.sub(r"\s+\([^()]*\)$", "", device)
@@ -1393,6 +1383,15 @@ def self_test(report):
             check("and its pages shown", len(made) == 1 and Image.open(made[0]).size[0] in range(820, 835), str(made))
         except Exception as e:
             check("and its pages shown", False, str(e))
+        if getattr(sys, "frozen", False) or os.environ.get("READERS_SCANNER_NEEDS_ZEROCONF"):
+            try:
+                import zeroconf
+                check("scanners on the network can be looked for", True, "zeroconf " + zeroconf.__version__)
+            except ImportError as e:
+                check("scanners on the network can be looked for", False, str(e))
+        t0 = time.time()
+        direct = escl_find(2.0)
+        lines.append(f"      scanners that answer by themselves: {[(d['name'], d['link']) for d in direct] or 'none'} ({time.time() - t0:.1f} s)")
         naps2 = Naps2(tmp)
         lines.append(f"      NAPS2: {' '.join(naps2.cmd) + ' ' + str(naps2.version) if naps2.cmd else 'not installed on this computer'}")
         if naps2.cmd:

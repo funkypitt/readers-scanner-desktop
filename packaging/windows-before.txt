@@ -1,6 +1,6 @@
-Reader's Scanner needs NAPS2 to drive the scanner.
+Most scanners need nothing else: those made since about 2015 (AirScan, Mopria) are found by
+themselves on the network.
 
-NAPS2 is free and open source; it is not installed by this program.
-Get it from https://www.naps2.com/download, before or after this installation.
-
-Without NAPS2, Reader's Scanner still files the pictures and PDFs you hand it, but cannot scan.
+The others, and scanners plugged in by USB, need NAPS2: a free, open-source program that is not
+installed by this one. Get it from https://www.naps2.com/download, before or after this
+installation. Reader's Scanner says so if it finds no scanner.

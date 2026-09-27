@@ -21,14 +21,16 @@ Version: $VERSION
 Section: graphics
 Priority: optional
 Architecture: all
-Depends: python3 (>= 3.8), python3-pyqt5, python3-requests, python3-pil, python3-numpy, tesseract-ocr, poppler-utils
-Recommends: naps2, sane-utils, tesseract-ocr-osd
+Depends: python3 (>= 3.8), python3-pyqt5, python3-requests, python3-pil, python3-numpy, python3-zeroconf, tesseract-ocr, poppler-utils
+Recommends: ipp-usb, tesseract-ocr-osd, sane-utils
+Suggests: naps2
 Maintainer: funkypitt <pierregallaz@gmail.com>
 Homepage: https://github.com/funkypitt/readers-scanner-desktop
-Description: One-click scanning to searchable PDFs, filed with the phone's (needs NAPS2)
- REQUIRES NAPS2 (free, https://www.naps2.com/download), which drives the
- scanner and is not in the distribution's archive: install its .deb or its
- Flatpak. Without it the app still files pictures and PDFs you hand it.
+Description: One-click scanning to searchable PDFs, filed with the phone's
+ Scanners made since about 2015 (AirScan, Mopria, eSCL) are asked directly, on
+ the network or by USB (through ipp-usb). THE OTHERS NEED NAPS2 (free,
+ https://www.naps2.com/download), which is not in the distribution's archive:
+ install its .deb or its Flatpak.
  .
  One window and one button: the pages come from the feeder or the glass,
  blank backs are left out, upside-down sheets set upright, the text is read

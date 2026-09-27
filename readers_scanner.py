@@ -139,7 +139,6 @@ _T = {
  "SANE is not installed (the scanner drivers)": ("SANE n'est pas installé (les pilotes de scanner)", "SANE ist nicht installiert (die Scannertreiber)", "SANE no está instalado (los controladores de escáner)", "O SANE não está instalado (os controladores de digitalizador)", "SANE не установлен (драйверы сканера)"),
  "scan cancelled": ("scan annulé", "Scan abgebrochen", "escaneo cancelado", "digitalização cancelada", "сканирование отменено"),
  "no scanner found — is it switched on?": ("aucun scanner trouvé — est-il allumé ?", "kein Scanner gefunden — ist er eingeschaltet?", "no se encontró ningún escáner — ¿está encendido?", "nenhum digitalizador encontrado — está ligado?", "сканер не найден — он включён?"),
- "NAPS2 is not installed": ("NAPS2 n'est pas installé", "NAPS2 ist nicht installiert", "NAPS2 no está instalado", "O NAPS2 não está instalado", "NAPS2 не установлен"),
  "the scan did not work": ("le scan n'a pas marché", "der Scan hat nicht geklappt", "el escaneo no funcionó", "a digitalização não funcionou", "сканирование не удалось"),
  "not a Reader's credentials file": ("ce n'est pas un fichier d'identifiants Reader's", "keine Reader's-Zugangsdatendatei", "no es un archivo de credenciales Reader's", "não é um ficheiro de credenciais Reader's", "это не файл учётных данных Reader's"),
  "credentials imported": ("identifiants importés", "Zugangsdaten importiert", "credenciales importadas", "credenciais importadas", "учётные данные импортированы"),
@@ -188,8 +187,6 @@ _T = {
  "export credentials…": ("exporter les identifiants…", "Zugangsdaten exportieren…", "exportar credenciales…", "exportar credenciais…", "экспортировать учётные данные…"),
  "look again": ("chercher à nouveau", "noch einmal suchen", "buscar de nuevo", "procurar de novo", "искать снова"),
  "scanner": ("scanner", "Scanner", "escáner", "digitalizador", "сканер"),
- "NAPS2 %1 — it talks to the scanner": ("NAPS2 %1 — c'est lui qui parle au scanner", "NAPS2 %1 — es spricht mit dem Scanner", "NAPS2 %1 — es el que habla con el escáner", "NAPS2 %1 — é ele que fala com o digitalizador", "NAPS2 %1 — он общается со сканером"),
- "NAPS2 is not installed: it is required, it talks to the scanner.": ("NAPS2 n'est pas installé : il est indispensable, c'est lui qui parle au scanner.", "NAPS2 ist nicht installiert: es ist erforderlich, es spricht mit dem Scanner.", "NAPS2 no está instalado: es imprescindible, es el que habla con el escáner.", "O NAPS2 não está instalado: é indispensável, é ele que fala com o digitalizador.", "NAPS2 не установлен: он необходим, он общается со сканером."),
  "automatic (%1 here)": ("automatique (%1 ici)", "automatisch (hier %1)", "automático (%1 aquí)", "automático (%1 aqui)", "автоматически (здесь %1)"),
  "A series (A4)": ("série A (A4)", "A-Reihe (A4)", "serie A (A4)", "série A (A4)", "серия A (A4)"),
  "page format": ("format des pages", "Seitenformat", "formato de página", "formato das páginas", "формат страниц"),
@@ -235,8 +232,6 @@ _T = {
  "put the pages on the scanner, press « scan »": ("posez les pages sur le scanner, appuyez sur « scanner »", "Seiten auf den Scanner legen, « scannen » drücken", "ponga las páginas en el escáner, pulse « escanear »", "ponha as páginas no digitalizador, carregue em « digitalizar »", "положите страницы в сканер и нажмите « сканировать »"),
  "In the feeder or on the glass: the scanner takes what it finds. The text is read on this computer, and the document becomes a PDF you can search.": ("Dans le chargeur ou sur la vitre : le scanner prend ce qu'il trouve. Le texte est lu sur cet ordinateur, et le document devient un PDF dans lequel on peut chercher.", "Im Einzug oder auf dem Glas: der Scanner nimmt, was er findet. Der Text wird auf diesem Computer gelesen, und das Dokument wird ein durchsuchbares PDF.", "En el alimentador o sobre el cristal: el escáner toma lo que encuentra. El texto se lee en este ordenador, y el documento se convierte en un PDF en el que se puede buscar.", "No alimentador ou no vidro: o digitalizador pega no que encontra. O texto é lido neste computador, e o documento torna-se um PDF pesquisável.", "В лотке или на стекле: сканер берёт то, что найдёт. Текст читается на этом компьютере, документ становится PDF с поиском."),
  "scan, or choose a document": ("scannez, ou choisissez un document", "scannen oder ein Dokument wählen", "escanee o elija un documento", "digitalize ou escolha um documento", "сканируйте или выберите документ"),
- "Reader's Scanner needs NAPS2": ("Reader's Scanner a besoin de NAPS2", "Reader's Scanner braucht NAPS2", "Reader's Scanner necesita NAPS2", "O Reader's Scanner precisa do NAPS2", "Для Reader's Scanner нужен NAPS2"),
- "NAPS2 is the free program that talks to the scanner. It is installed separately, from naps2.com. Once it is there, « look again »; pictures and PDFs can be brought in from files meanwhile.": ("NAPS2 est le logiciel libre qui parle au scanner. Il s'installe à part, depuis naps2.com. Une fois installé, « chercher à nouveau » ; en attendant, des images et des PDF peuvent être apportés depuis des fichiers.", "NAPS2 ist das freie Programm, das mit dem Scanner spricht. Es wird separat installiert, von naps2.com. Danach « noch einmal suchen »; bis dahin lassen sich Bilder und PDFs aus Dateien holen.", "NAPS2 es el programa libre que habla con el escáner. Se instala aparte, desde naps2.com. Una vez instalado, « buscar de nuevo »; mientras tanto se pueden traer imágenes y PDF desde archivos.", "O NAPS2 é o programa livre que fala com o digitalizador. Instala-se à parte, a partir de naps2.com. Depois, « procurar de novo »; entretanto, imagens e PDFs podem vir de ficheiros.", "NAPS2 — свободная программа, которая общается со сканером. Она устанавливается отдельно, с naps2.com. После установки — « искать снова »; пока что изображения и PDF можно взять из файлов."),
  "get NAPS2": ("obtenir NAPS2", "NAPS2 holen", "obtener NAPS2", "obter o NAPS2", "получить NAPS2"),
  "scanned elsewhere": ("scanné ailleurs", "anderswo gescannt", "escaneado en otro lugar", "digitalizado noutro lado", "отсканировано в другом месте"),
  "pages": ("pages", "Seiten", "páginas", "páginas", "страницы"),
@@ -281,6 +276,16 @@ _T = {
  "no scanner found yet": ("pas encore de scanner", "noch kein Scanner gefunden", "aún sin escáner", "ainda sem digitalizador", "сканер пока не найден"),
  "the scanner is getting ready…": ("le scanner se prépare…", "der Scanner macht sich bereit…", "el escáner se prepara…", "o digitalizador prepara-se…", "сканер готовится…"),
  "an error — see errors.log": ("erreur — voir errors.log", "Fehler — siehe errors.log", "error — ver errors.log", "erro — ver errors.log", "ошибка — см. errors.log"),
+ "no scanner found": ("aucun scanner trouvé", "kein scanner gefunden", "ningún escáner encontrado", "nenhum digitalizador encontrado", "сканер не найден"),
+ "Most scanners made since 2015 (AirScan, Mopria) are found by themselves, on the network or by USB: is yours switched on? The others need NAPS2, a free program installed separately, from naps2.com. Pictures and PDFs can be brought in from files meanwhile.":
+    ("La plupart des scanners fabriqués depuis 2015 (AirScan, Mopria) sont trouvés d'eux-mêmes, sur le réseau ou par USB : le vôtre est-il allumé ? Les autres ont besoin de NAPS2, un programme libre qui s'installe à part, depuis naps2.com. En attendant, des images et des PDF peuvent être repris depuis des fichiers.",
+     "Die meisten scanner seit 2015 (AirScan, Mopria) werden von selbst gefunden, im netz oder über USB: ist ihrer eingeschaltet? Die anderen brauchen NAPS2, ein freies programm, das getrennt installiert wird, von naps2.com. Inzwischen lassen sich bilder und PDFs aus dateien übernehmen.",
+     "La mayoría de los escáneres fabricados desde 2015 (AirScan, Mopria) se encuentran solos, en la red o por USB: ¿está encendido el suyo? Los demás necesitan NAPS2, un programa libre que se instala aparte, desde naps2.com. Mientras tanto se pueden traer imágenes y PDF desde archivos.",
+     "A maior parte dos digitalizadores fabricados desde 2015 (AirScan, Mopria) é encontrada por si, na rede ou por USB: o seu está ligado? Os outros precisam do NAPS2, um programa livre instalado à parte, a partir de naps2.com. Entretanto podem trazer-se imagens e PDF de ficheiros.",
+     "Большинство сканеров, выпущенных с 2015 года (AirScan, Mopria), находятся сами, в сети или по USB: ваш включён? Остальным нужен NAPS2 — свободная программа, которая устанавливается отдельно, с naps2.com. Пока можно взять изображения и PDF из файлов."),
+ "NAPS2 %1 is here, for the scanners that do not answer by themselves": ("NAPS2 %1 est là, pour les scanners qui ne répondent pas d'eux-mêmes", "NAPS2 %1 ist da, für scanner, die nicht von selbst antworten", "NAPS2 %1 está aquí, para los escáneres que no responden solos", "NAPS2 %1 está cá, para os digitalizadores que não respondem por si", "NAPS2 %1 установлен — для сканеров, которые не отвечают сами"),
+ "NAPS2 is not installed: only the scanners that do not answer by themselves (AirScan) need it.": ("NAPS2 n'est pas installé : seuls les scanners qui ne répondent pas d'eux-mêmes (AirScan) en ont besoin.", "NAPS2 ist nicht installiert: nur scanner, die nicht von selbst antworten (AirScan), brauchen es.", "NAPS2 no está instalado: solo lo necesitan los escáneres que no responden solos (AirScan).", "O NAPS2 não está instalado: só os digitalizadores que não respondem por si (AirScan) precisam dele.", "NAPS2 не установлен: он нужен только сканерам, которые не отвечают сами (AirScan)."),
+ "two sheets went in together": ("deux feuilles sont passées ensemble", "zwei blätter wurden zusammen eingezogen", "dos hojas entraron juntas", "duas folhas entraram juntas", "два листа прошли вместе"),
  "syncing…": ("synchronisation…", "synchronisiert…", "sincronizando…", "a sincronizar…", "синхронизация…"),
  "on this computer only": ("sur cet ordinateur seulement", "nur auf diesem Computer", "solo en este ordenador", "só neste computador", "только на этом компьютере"),
  "Ctrl+, to set up a WebDAV folder shared with the phone": ("Ctrl+, pour configurer un dossier WebDAV partagé avec le téléphone", "Strg+, um einen mit dem Telefon geteilten WebDAV-Ordner einzurichten", "Ctrl+, para configurar una carpeta WebDAV compartida con el teléfono", "Ctrl+, para configurar uma pasta WebDAV partilhada com o telemóvel", "Ctrl+, — настроить папку WebDAV, общую с телефоном"),
@@ -2280,20 +2285,22 @@ def error_text(code, detail=""):
         "busy": _("the scanner is busy"), "cover": _("the scanner's cover is open"), "jam": _("paper jam in the scanner"),
         "warming": _("the scanner is warming up — try again in a moment"), "comm": _("the connection to the scanner was interrupted"),
         "nosane": _("SANE is not installed (the scanner drivers)"), "cancelled": _("scan cancelled"),
-        "nodevice": _("no scanner found — is it switched on?"), "nonaps2": _("NAPS2 is not installed"),
+        "nodevice": _("no scanner found — is it switched on?"), "nonaps2": _("no scanner found"),
+        "multipick": _("two sheets went in together"),
     }.get(code) or (detail or _("the scan did not work"))
 
 
 def _model_key(name):
     """The same scanner reached by several drivers gets the same key."""
-    n = re.sub(r"\([^)]*\)", " ", name.lower().replace("_", " "))
+    n = re.sub(r"\([^)]*\)|\[[^\]]*\]", " ", name.lower().replace("_", " "))
     n = re.sub(r"\b(hewlett[- ]?packard|hp|canon|epson|brother|fujitsu|ricoh|samsung|xerox|kodak|lexmark|kyocera)\b", " ", n)
     return re.sub(r"[^a-z0-9]", "", n) or re.sub(r"[^a-z0-9]", "", name.lower())
 
 
-# driverless first: they work without the maker's software. sane's own « escl » comes last of
-# all: with a stack in the feeder it handed over one page (HP ScanJet Pro 4500 fn1, 2026-09-27).
-_BACKEND_ORDER = ("airscan",)
+# the scanner asked directly first (parts/19_escl.py), then NAPS2's ways to it: the driverless
+# ones, which work without the maker's software. sane's own « escl » comes last of all: with a
+# stack in the feeder it handed over one page (HP ScanJet Pro 4500 fn1, 2026-09-27).
+_BACKEND_ORDER = ("direct", "airscan")
 _BACKEND_LAST = ("escl",)
 
 
@@ -2301,6 +2308,20 @@ def backend_rank(backend):
     if backend in _BACKEND_ORDER:
         return _BACKEND_ORDER.index(backend)
     return len(_BACKEND_ORDER) + (2 if backend in _BACKEND_LAST else 1)
+
+
+def link_of(way):
+    """"usb" or "net": how this way reaches the scanner."""
+    if way.get("link"):
+        return way["link"]
+    words = f"{way.get('id') or ''} {way.get('name') or ''}".lower()
+    return "usb" if "(usb)" in words or "/usb/" in words or ":usb:" in words or "//localhost" in words or "libusb" in words else "net"
+
+
+def way_order(way):
+    """The app chooses, nobody is asked: a way that failed twice running goes last; then the
+    better driver; then, of two ways by the same driver, the cable before the network."""
+    return (way.get("misses", 0) >= 2, backend_rank(way["backend"]), link_of(way) != "usb")
 
 
 class Naps2:
@@ -2314,6 +2335,8 @@ class Naps2:
         self._cancelled = False
         self.heard = []                # what NAPS2 wrote during the last scans, for whoever must understand one
         self.alive = 0                 # when the scanner last answered
+        self.direct = None             # the scanner being asked directly, while it scans
+        self.asked_all = False
 
     @staticmethod
     def find():
@@ -2376,8 +2399,33 @@ class Naps2:
         except (OSError, subprocess.SubprocessError, IndexError):
             return None
 
-    def devices(self):
-        """Every way to every scanner: {"id" (None when only NAPS2 knows it), "name", "backend", "key"}."""
+    def devices(self, every=True):
+        """Every way to every scanner: {"id" (None when only NAPS2 knows it), "name", "backend",
+        "key"}, and "url" for a scanner that can be asked directly. Those are found in a moment;
+        NAPS2's ways take ten seconds and more: with `every` false they are only looked for when
+        no scanner answers by itself."""
+        named = os.environ.get("READERS_SCANNER_DIRECT")
+        if named is not None:              # the tests' scanners, and no others
+            direct = [w for w in (escl_probe(u.strip()) for u in named.split(",") if u.strip()) if w]
+        else:
+            direct = escl_find()
+        direct.sort(key=way_order)
+        self.asked_all = not (direct and not every) and bool(self.cmd)      # were NAPS2's ways looked for too?
+        if not self.asked_all:
+            return direct
+        found = self._devices()
+        if named is None:                  # sane's escl names the address of a network scanner: it can be asked directly too
+            known = {d["url"] for d in direct}
+            for d in found:
+                url = (d.get("id") or "")[5:] if (d.get("id") or "").startswith("escl:http") else None
+                if url and url.rstrip("/") not in known and "localhost" not in url:
+                    way = escl_probe(url.rstrip("/"))
+                    if way and way["uuid"] not in {x["uuid"] for x in direct if x["uuid"]}:
+                        direct.append(way)
+                        known.add(way["url"])
+        return sorted(direct + found, key=way_order)
+
+    def _devices(self):
         found, asked = [], False
         scanimage = os.environ.get("READERS_SCANNER_SCANIMAGE") or shutil.which("scanimage")
         if self.driver == "sane" and scanimage and not self.flatpak:
@@ -2415,7 +2463,7 @@ class Naps2:
                 pass
             if found:
                 break                  # the usual driver sees it: the others are not asked
-        return sorted(found, key=lambda d: backend_rank(d["backend"]))
+        return sorted(found, key=way_order)
 
     def _profile(self, device, source, pagesize, deskew):
         os.makedirs(self.data, exist_ok=True)
@@ -2442,6 +2490,16 @@ class Naps2:
 
     def scan(self, device, source, pagesize, out_dir, on_page=None):
         """One scan from one source. Returns (page files, error code or None, NAPS2's words)."""
+        if device.get("url"):
+            self._cancelled = False
+            self.direct = Escl(device["url"])
+            try:
+                self.heard = self.heard[-200:] + [f"--- {source} · direct · {datetime.now():%H:%M:%S}"]
+                files, code, words = self.direct.scan(source, pagesize, out_dir, on_page)
+                self.heard.append(f"{len(files)} page(s) {code or ''} {words}".strip())
+                return ([], "cancelled", "") if self._cancelled else (files, code, words)
+            finally:
+                self.direct = None
         os.makedirs(out_dir, exist_ok=True)
         for f in os.listdir(out_dir):
             remove(os.path.join(out_dir, f))
@@ -2484,6 +2542,10 @@ class Naps2:
         return [], code or "unknown", words
 
     def cancel(self):
+        direct = self.direct
+        if direct is not None:
+            self._cancelled = True
+            direct.cancel()
         p = self.proc
         if p is not None:
             self._cancelled = True
@@ -2520,16 +2582,17 @@ def scan_pages(naps2, cfg, source, out_dir, on_page=None, on_state=None):
     glass otherwise; when the scanner does not answer on one driver, the next one is tried, and
     the scanners are looked for again once (an address may have changed). Returns a dict:
     files, source (the one used), error (code) and detail, blank (pages left out), device."""
-    if not naps2.cmd:
-        return {"files": [], "error": "nonaps2", "detail": ""}
     routes = list((cfg.get("device") or {}).get("routes") or [])
-    searched = False
+    if not naps2.cmd:
+        routes = [r for r in routes if r.get("url")]
+    searched = 0                       # 1: the scanners that answer by themselves were looked for; 2: NAPS2's too
     if not routes:
         on_state and on_state("searching")
-        routes = pick_routes(naps2.devices(), None)
-        searched = True
+        found = naps2.devices(every=False)
+        routes = pick_routes(found, None)
+        searched = 2 if naps2.asked_all or not naps2.cmd else 1
         if not routes:
-            return {"files": [], "error": "nodevice", "detail": ""}
+            return {"files": [], "error": "nodevice" if naps2.cmd else "nonaps2", "detail": ""}
     key = routes[0]["key"]
     pagesize = page_size_of(cfg)
     last = ("unknown", "")
@@ -2541,10 +2604,11 @@ def scan_pages(naps2, cfg, source, out_dir, on_page=None, on_state=None):
             on_state and on_state(src)
             for patience in range(5):      # just after a scan the scanner may still be busy: a moment, not an error
                 files, err, said = naps2.scan(route, src, pagesize, out_dir, on_page)
-                if files or err in ("empty", "busy", "warming", "nofeeder", "noduplex", "cover", "jam"):
+                if files or err in ("empty", "busy", "warming", "nofeeder", "noduplex", "cover", "jam", "multipick"):
                     naps2.alive = time.time()
                 # « offline » from a scanner that answered a minute ago is the same moment of absence
-                moment = err in ("busy", "warming") or (err in ("offline", "comm") and patience == 0 and time.time() - naps2.alive < 90)
+                # (asked directly, a scanner that does not answer is not there: the next way at once)
+                moment = err in ("busy", "warming") or (err in ("offline", "comm") and patience == 0 and time.time() - naps2.alive < 90 and not route.get("url"))
                 if not moment or patience == 4:
                     break
                 on_state and on_state("waiting")
@@ -2560,7 +2624,7 @@ def scan_pages(naps2, cfg, source, out_dir, on_page=None, on_state=None):
                 # goes behind the others
                 for r in routes:
                     r["misses"] = 0 if r is route else r.get("misses", 0) + (1 if r in missed else 0)
-                routes = sorted(routes, key=lambda r: (r.get("misses", 0) >= 2, backend_rank(r["backend"])))
+                routes = sorted(routes, key=way_order)
                 return {"files": [f for f in files if f not in blank], "blank": blank, "source": src, "error": None,
                         "device": {"key": key, "name": route["name"], "routes": routes}}
             last = (err, said)
@@ -2571,12 +2635,18 @@ def scan_pages(naps2, cfg, source, out_dir, on_page=None, on_state=None):
             if err in ("empty", "nofeeder", "noduplex", "unknown") and src != "glass":
                 break                          # nothing in the feeder: the glass, when automatic
             if err in ("notfound", "offline", "comm", "driver", "unknown"):
-                if not tries and not searched:
+                while not tries and searched < 2:
+                    # looked for again, once: first those that answer by themselves (a moment), then every way
                     on_state and on_state("searching")
-                    searched = True
-                    again = pick_routes(naps2.devices(), key)
+                    again = pick_routes(naps2.devices(every=searched == 1), key)
+                    searched = 2 if naps2.asked_all or not naps2.cmd else searched + 1
                     tries = [r for r in again if r.get("id") not in {x.get("id") for x in routes} or r.get("id") is None] if again else []
-                    routes = again or routes
+                    for r in again:        # what is known of a way is kept
+                        r["misses"] = next((x.get("misses", 0) for x in routes if x.get("id") == r.get("id") and r.get("id")), 0)
+                    # every way looked for: what is not found any more is forgotten; after the quick
+                    # look, NAPS2's ways, which it did not ask, stay
+                    kept = [x for x in routes if not x.get("url") and x.get("id") not in {r.get("id") for r in again}] if searched == 1 else []
+                    routes = (again + kept) if again else routes
                 continue
             return {"files": [], "error": err, "detail": said, "source": src}
         else:
@@ -2591,6 +2661,302 @@ def pick_routes(devices, key):
         return []
     key = key if key and any(d["key"] == key for d in devices) else devices[0]["key"]
     return [d for d in devices if d["key"] == key]
+# ------------------------------------------------------------------------------------------
+# Scanners asked directly. Most scanners sold since about 2015 speak eSCL (« AirScan »,
+# « Mopria »): HTTP and a little XML, over the network, or over USB through ipp-usb on Linux.
+# Nothing to install, no driver; the scanner says itself whether its feeder is loaded, hands
+# its pages over one by one, and names what goes wrong by a code instead of a sentence.
+# ------------------------------------------------------------------------------------------
+
+ESCL_NS = {"scan": "http://schemas.hp.com/imaging/escl/2011/05/03", "pwg": "http://www.pwg.org/schemas/2010/12/sm"}
+_ADF_STATES = {   # what the scanner says of its feeder → our word for it
+    "ScannerAdfEmpty": "empty", "ScannerAdfJam": "jam", "ScannerAdfMispick": "jam", "ScannerAdfMultipickDetected": "multipick",
+    "ScannerAdfDoorOpen": "cover", "ScannerAdfHatchOpen": "cover", "ScannerAdfInputTrayFailed": "jam", "ScannerAdfInputTrayOverloaded": "jam",
+    "ScannerAdfDuplexPageTooShort": "jam", "ScannerAdfDuplexPageTooLong": "jam",
+}
+
+
+class EsclError(Exception):
+    def __init__(self, code, words=""):
+        super().__init__(words or code)
+        self.code, self.words = code, words
+
+
+class Escl:
+    """One scanner at one address ("http://192.168.1.120:8080", "http://localhost:60001")."""
+
+    def __init__(self, url, timeout=8):
+        self.url = url.rstrip("/")
+        self.timeout = timeout
+        self.http = requests.Session()
+        self.http.verify = False           # scanners sign their own certificates
+        try:
+            import urllib3
+            urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+        except Exception:
+            pass
+        self.http.headers["User-Agent"] = f"{APP}-desktop/{VERSION}"
+        self.job = None
+        self._cancelled = False
+        self._caps = None
+
+    # ---- what it is and how it is --------------------------------------------------------
+
+    def _get(self, path, timeout=None):
+        try:
+            r = self.http.get(self.url + path, timeout=(min(3, timeout or self.timeout), timeout or self.timeout))
+        except requests.RequestException as e:
+            raise EsclError("offline", str(e))
+        if r.status_code == 503:
+            raise EsclError("busy", "503")
+        if r.status_code != 200:
+            raise EsclError("offline", f"{path}: HTTP {r.status_code}")
+        return r
+
+    @staticmethod
+    def _xml(text):
+        try:
+            return ET.fromstring(text)
+        except ET.ParseError as e:
+            raise EsclError("driver", str(e))
+
+    def caps(self):
+        """{"name", "uuid", "version", "glass": {...} or None, "feeder": {...} or None}; a source:
+        {"width", "height" (300ths of an inch), "dpi": [...], "modes": [...], "formats": [...], "duplex": bool}."""
+        if self._caps is None:
+            root = self._xml(self._get("/eSCL/ScannerCapabilities").content)
+
+            def text(node, path):
+                found = node.find(path, ESCL_NS) if node is not None else None
+                return (found.text or "").strip() if found is not None else ""
+
+            def source(caps, duplex=False):
+                if caps is None:
+                    return None
+                dpi = sorted({int(x.text) for x in caps.iterfind(".//scan:DiscreteResolution/scan:XResolution", ESCL_NS) if (x.text or "").strip().isdigit()})
+                ranges = caps.find(".//scan:ResolutionRange/scan:XResolutionRange", ESCL_NS)
+                if not dpi and ranges is not None:
+                    low, high = int(text(ranges, "scan:Min") or 75), int(text(ranges, "scan:Max") or 600)
+                    dpi = [d for d in (75, 100, 150, 200, 300, 400, 600, 1200) if low <= d <= high]
+                return {"width": int(text(caps, "scan:MaxWidth") or 2550), "height": int(text(caps, "scan:MaxHeight") or 3508), "dpi": dpi,
+                        "modes": sorted({(x.text or "").strip() for x in caps.iterfind(".//scan:ColorMode", ESCL_NS)}),
+                        "formats": sorted({(x.text or "").strip() for x in caps.iterfind(".//pwg:DocumentFormat", ESCL_NS)}
+                                          | {(x.text or "").strip() for x in caps.iterfind(".//scan:DocumentFormatExt", ESCL_NS)}),
+                        "duplex": duplex}
+
+            adf = root.find("scan:Adf", ESCL_NS)
+            two = adf.find("scan:AdfDuplexInputCaps", ESCL_NS) if adf is not None else None
+            one = adf.find("scan:AdfSimplexInputCaps", ESCL_NS) if adf is not None else None
+            options = {(x.text or "").strip() for x in adf.iterfind(".//scan:AdfOption", ESCL_NS)} if adf is not None else set()
+            self._caps = {"name": text(root, "pwg:MakeAndModel") or "scanner", "uuid": text(root, "scan:UUID"), "version": text(root, "pwg:Version") or "2.0",
+                          "glass": source(root.find("scan:Platen/scan:PlatenInputCaps", ESCL_NS)),
+                          "feeder": source(one if one is not None else two, duplex=two is not None or "Duplex" in options),
+                          "both": source(two, duplex=True), "knows_if_loaded": "DetectPaperLoaded" in options}
+        return self._caps
+
+    def status(self):
+        """(state: "Idle", "Processing", "Stopped"…, feeder: "ScannerAdfLoaded", "ScannerAdfEmpty"… or "")."""
+        root = self._xml(self._get("/eSCL/ScannerStatus").content)
+        state, adf = root.find("pwg:State", ESCL_NS), root.find("scan:AdfState", ESCL_NS)
+        return ((state.text or "").strip() if state is not None else "", (adf.text or "").strip() if adf is not None else "")
+
+    def job_reasons(self, job):
+        """Why a job ended, as the scanner tells it afterwards."""
+        try:
+            root = self._xml(self._get("/eSCL/ScannerStatus").content)
+        except EsclError:
+            return []
+        for info in root.iterfind(".//scan:JobInfo", ESCL_NS):
+            uri = info.find("pwg:JobUri", ESCL_NS)
+            if uri is not None and (uri.text or "").strip().rstrip("/") == job.rstrip("/"):
+                return [(x.text or "").strip() for x in info.iterfind(".//pwg:JobStateReason", ESCL_NS)]
+        return []
+
+    # ---- a scan ------------------------------------------------------------------------------
+
+    def _settings(self, source, pagesize, dpi):
+        caps = self.caps()
+        box = caps["glass" if source == "glass" else "both" if source == "duplex" and caps.get("both") else "feeder"]
+        if box is None:
+            raise EsclError("nofeeder" if source != "glass" else "driver")
+        if source == "duplex" and not caps["feeder"]["duplex"]:
+            raise EsclError("noduplex")
+        width, height = (2550, 3300) if pagesize == "Letter" else (2480, 3508)
+        width, height = min(width, box["width"]), min(height, box["height"])
+        dpi = dpi if dpi in box["dpi"] or not box["dpi"] else min(box["dpi"], key=lambda d: (abs(d - dpi), -d))
+        mode = "RGB24" if "RGB24" in box["modes"] or not box["modes"] else box["modes"][0]
+        ext = float(caps["version"]) >= 2.1 if re.fullmatch(r"\d+(\.\d+)?", caps["version"]) else False
+        return ('<?xml version="1.0" encoding="UTF-8"?>\n'
+                f'<scan:ScanSettings xmlns:scan="{ESCL_NS["scan"]}" xmlns:pwg="{ESCL_NS["pwg"]}">'
+                f'<pwg:Version>{caps["version"]}</pwg:Version>'
+                '<pwg:ScanRegions><pwg:ScanRegion><pwg:ContentRegionUnits>escl:ThreeHundredthsOfInches</pwg:ContentRegionUnits>'
+                f'<pwg:XOffset>0</pwg:XOffset><pwg:YOffset>0</pwg:YOffset><pwg:Width>{width}</pwg:Width><pwg:Height>{height}</pwg:Height>'
+                '</pwg:ScanRegion></pwg:ScanRegions>'
+                f'<pwg:InputSource>{"Platen" if source == "glass" else "Feeder"}</pwg:InputSource>'
+                f'<scan:ColorMode>{mode}</scan:ColorMode>'
+                '<pwg:DocumentFormat>image/jpeg</pwg:DocumentFormat>'
+                + ('<scan:DocumentFormatExt>image/jpeg</scan:DocumentFormatExt>' if ext else '')
+                + f'<scan:XResolution>{dpi}</scan:XResolution><scan:YResolution>{dpi}</scan:YResolution>'
+                + (f'<scan:Duplex>{"true" if source == "duplex" else "false"}</scan:Duplex>' if source != "glass" else '')
+                + '</scan:ScanSettings>'), dpi
+
+    def scan(self, source, pagesize, out_dir, on_page=None, dpi=None):
+        """One scan from one source ("glass", "feeder", "duplex"). Returns (page files, error code
+        or None, the scanner's words). The pages are written as they come."""
+        dpi = dpi or DPI
+        os.makedirs(out_dir, exist_ok=True)
+        for f in os.listdir(out_dir):
+            remove(os.path.join(out_dir, f))
+        self._cancelled, self.job, files = False, None, []
+        try:
+            state, adf = self.status()     # is it there at all? a cable pulled out is known in a moment
+            if source != "glass" and adf in _ADF_STATES:
+                return [], _ADF_STATES[adf], adf
+            body, dpi = self._settings(source, pagesize, dpi)
+            for patience in range(8):
+                try:
+                    r = self.http.post(self.url + "/eSCL/ScanJobs", data=body.encode("utf-8"), headers={"Content-Type": "text/xml"}, timeout=(3, 30))
+                except requests.RequestException as e:
+                    return [], "offline", str(e)
+                if r.status_code != 503 or self._cancelled:
+                    break
+                time.sleep(2)              # busy with the scan before
+            if self._cancelled:
+                return [], "cancelled", ""
+            if r.status_code == 503:
+                return [], "busy", "503"
+            if r.status_code not in (200, 201) or not r.headers.get("Location"):
+                state, adf = self.status()
+                return [], _ADF_STATES.get(adf) or ("empty" if r.status_code == 409 and source != "glass" else "driver"), f"HTTP {r.status_code} {adf}".strip()
+            self.job = urlparse(r.headers["Location"]).path.rstrip("/")     # the address it gives may be one only it knows
+            quiet_tries = 0
+            while not self._cancelled:
+                try:
+                    page = self.http.get(self.url + self.job + "/NextDocument", timeout=(10, 180))
+                except requests.RequestException as e:
+                    if files:
+                        break
+                    return [], "comm", str(e)
+                if page.status_code == 200 and page.content:
+                    out = os.path.join(out_dir, f"p{len(files) + 1:04d}.jpg")
+                    with open(out, "wb") as f:
+                        f.write(page.content)
+                    self._stamp(out, dpi)
+                    files.append(out)
+                    quiet_tries = 0
+                    on_page and on_page(len(files))
+                    if source == "glass":
+                        break
+                elif page.status_code == 503 and quiet_tries < 30:
+                    quiet_tries += 1       # the page is not ready yet
+                    time.sleep(1)
+                else:
+                    break                  # 404: no more pages
+            if self._cancelled:
+                return [], "cancelled", ""
+            if files:
+                return files, None, ""
+            reasons = self.job_reasons(self.job)
+            state, adf = self.status()
+            return [], _ADF_STATES.get(adf) or ("empty" if source != "glass" else "driver"), " ".join(reasons + [adf]).strip()
+        except EsclError as e:
+            return [], e.code, e.words
+        finally:
+            job, self.job = self.job, None
+            if job and (self._cancelled or not files):
+                try:
+                    self.http.delete(self.url + job, timeout=5)
+                except requests.RequestException:
+                    pass
+
+    @staticmethod
+    def _stamp(path, dpi):
+        """The resolution written in the file when the scanner left it out (the PDF's page size
+        comes from it) — without touching the picture."""
+        try:
+            with open(path, "r+b") as f:
+                head = f.read(20)
+                if head[:4] == b"\xff\xd8\xff\xe0" and head[6:11] == b"JFIF\x00" and (head[13] == 0 or head[14:16] in (b"\x00\x00", b"\x00\x01")):
+                    f.seek(13)
+                    f.write(bytes([1]) + dpi.to_bytes(2, "big") + dpi.to_bytes(2, "big"))
+        except OSError:
+            pass
+
+    def cancel(self):
+        self._cancelled = True
+        job = self.job
+        if job:
+            try:
+                requests.delete(self.url + job, timeout=5, verify=False)
+            except requests.RequestException:
+                pass
+
+
+def escl_probe(url, timeout=1.5):
+    """The scanner at this address, as a way to it, or None."""
+    try:
+        e = Escl(url, timeout)
+        caps = e.caps()
+    except EsclError:
+        return None
+    # ipp-usb, which carries eSCL over the cable, listens on this computer under the name localhost
+    return {"id": url, "url": url, "name": caps["name"], "backend": "direct", "key": _model_key(caps["name"]), "uuid": caps["uuid"],
+            "link": "usb" if urlparse(url).hostname == "localhost" else "net",
+            "feeder": caps["feeder"] is not None, "duplex": bool(caps["feeder"] and caps["feeder"]["duplex"])}
+
+
+def escl_find(seconds=3.0):
+    """The scanners that can be asked directly: over USB through ipp-usb (Linux: it listens on
+    this computer, ports 60000 and up), and on the network (they announce themselves). A scanner
+    plugged in and on the network is found twice: two ways to one scanner, the cable first."""
+    found, seen = [], set()
+
+    def add(url):
+        way = escl_probe(url)
+        if way and url not in seen:
+            seen.add(url)
+            found.append(way)
+
+    if sys.platform.startswith("linux"):
+        import socket
+        for port in range(60000, 60016):
+            try:
+                socket.create_connection(("127.0.0.1", port), 0.15).close()
+            except OSError:
+                continue
+            add(f"http://localhost:{port}")
+    try:
+        from zeroconf import ServiceBrowser, Zeroconf
+    except ImportError:
+        return found
+    urls = []
+
+    class Heard:
+        def add_service(self, zc, kind, name):
+            info = zc.get_service_info(kind, name, 1500)
+            if info and info.parsed_addresses():
+                address = next((a for a in info.parsed_addresses() if ":" not in a), info.parsed_addresses()[0])
+                root = (info.properties.get(b"rs") or b"eSCL").decode("utf-8", "replace").strip("/")
+                host = f"[{address}]" if ":" in address else address
+                urls.append(("https" if kind.startswith("_uscans") else "http", host, info.port, root))
+
+        update_service = remove_service = lambda self, *a: None
+
+    try:
+        zc = Zeroconf()
+    except OSError:
+        return found
+    try:
+        heard = Heard()
+        browsers = [ServiceBrowser(zc, kind, heard) for kind in ("_uscan._tcp.local.", "_uscans._tcp.local.")]
+        time.sleep(seconds)
+        del browsers
+    finally:
+        zc.close()
+    for scheme, host, port, root in sorted(set(urls)):      # http before https
+        if root.lower() == "escl" and not host.startswith("127."):
+            add(f"{scheme}://{host}:{port}")
+    return found
 
 
 # ------------------------------------------------------------------------------------------
@@ -3325,8 +3691,8 @@ class SettingsDialog(QtWidgets.QDialog):
         self.devices = None
         self.fill_scanners()
         naps = main.naps2
-        self.naps = QtWidgets.QLabel(_("NAPS2 %1 — it talks to the scanner", naps.version) if naps.cmd else
-                                     _("NAPS2 is not installed: it is required, it talks to the scanner.") + f' <a href="{NAPS2_URL}">naps2.com</a>')
+        self.naps = QtWidgets.QLabel(_("NAPS2 %1 is here, for the scanners that do not answer by themselves", naps.version) if naps.cmd else
+                                     _("NAPS2 is not installed: only the scanners that do not answer by themselves (AirScan) need it.") + f' <a href="{NAPS2_URL}">naps2.com</a>')
         self.naps.setObjectName("dim"); self.naps.setOpenExternalLinks(True); self.naps.setWordWrap(True)
         form.addRow("", self.naps)
 
@@ -3660,7 +4026,7 @@ class Main(QtWidgets.QMainWindow):
         self.update_status()
         if self.configured():
             QtCore.QTimer.singleShot(0, self.sync)
-        if self.naps2.cmd and not self.cfg.get("device"):
+        if not self.cfg.get("device"):
             QtCore.QTimer.singleShot(0, self.find_scanner)
 
     def configured(self):
@@ -3981,9 +4347,7 @@ class Main(QtWidgets.QMainWindow):
 
     def welcome(self):
         self.current = None
-        if not self.naps2.cmd:
-            self.naps2_page()
-        elif self.store.count() == 0:
+        if self.store.count() == 0:
             self.say(_("put the pages on the scanner, press « scan »"),
                      _("In the feeder or on the glass: the scanner takes what it finds. The text is read on this computer, and the document becomes a PDF you can search."),
                      (("scan", _("scan")), ("import", _("from files…"))))
@@ -3991,9 +4355,11 @@ class Main(QtWidgets.QMainWindow):
             self.say(_("scan, or choose a document"), "", (("scan", _("scan")),))
 
     def naps2_page(self):
-        self.say(_("Reader's Scanner needs NAPS2"),
-                 _("NAPS2 is the free program that talks to the scanner. It is installed separately, from naps2.com. Once it is there, « look again »; pictures and PDFs can be brought in from files meanwhile."),
-                 (("naps2", _("get NAPS2")), ("again", _("look again")), ("import", _("from files…"))))
+        """No scanner answers by itself and NAPS2, which knows the others, is not there."""
+        self.say(_("no scanner found"),
+                 _("Most scanners made since 2015 (AirScan, Mopria) are found by themselves, on the network or by USB: is yours switched on? "
+                   "The others need NAPS2, a free program installed separately, from naps2.com. Pictures and PDFs can be brought in from files meanwhile."),
+                 (("again", _("look again")), ("naps2", _("get NAPS2")), ("import", _("from files…"))))
 
     def message_action(self, key):
         if key == "scan":
@@ -4008,12 +4374,7 @@ class Main(QtWidgets.QMainWindow):
             QtGui.QDesktopServices.openUrl(QtCore.QUrl(NAPS2_URL))
         elif key == "again":
             self.naps2 = Naps2(DATA_DIR)
-            if self.naps2.cmd:
-                self.welcome()
-                if not self.cfg.get("device"):
-                    self.find_scanner()
-            else:
-                self.naps2_page()
+            self.scan()
         elif key == "review":
             self.show_review()
 
@@ -4313,7 +4674,7 @@ class Main(QtWidgets.QMainWindow):
     # ---- scanning ----------------------------------------------------------------------
 
     def find_scanner(self):
-        if self.searching or not self.naps2.cmd:
+        if self.searching:
             return
         self.searching = True
         self.update_status()
@@ -4326,17 +4687,14 @@ class Main(QtWidgets.QMainWindow):
                 save_config(self.cfg)
             self.update_status()
 
-        self.run(lambda say: self.naps2.devices(), found, lambda m: found([]))
+        self.run(lambda say: self.naps2.devices(every=False), found, lambda m: found([]))
 
     def scan(self):
         if self.scanning:
             self.cancel_scan()
             return
         if not self.naps2.cmd:
-            self.naps2 = Naps2(DATA_DIR)
-            if not self.naps2.cmd:
-                self.naps2_page()
-                return
+            self.naps2 = Naps2(DATA_DIR)   # installed meanwhile, perhaps
         self.scanning = True
         self.trouble = ""
         self.scan_button.setText(_("cancel"))
@@ -4699,9 +5057,7 @@ class Main(QtWidgets.QMainWindow):
 
     def update_status(self):
         device = (self.cfg.get("device") or {}).get("name")
-        if not self.naps2.cmd:
-            scanner = _("NAPS2 is not installed")
-        elif self.searching:
+        if self.searching:
             scanner = _("looking for the scanner…")
         elif device:
             scanner = re.sub(r"\s+\([^()]*\)$", "", device)
@@ -4837,6 +5193,15 @@ def self_test(report):
             check("and its pages shown", len(made) == 1 and Image.open(made[0]).size[0] in range(820, 835), str(made))
         except Exception as e:
             check("and its pages shown", False, str(e))
+        if getattr(sys, "frozen", False) or os.environ.get("READERS_SCANNER_NEEDS_ZEROCONF"):
+            try:
+                import zeroconf
+                check("scanners on the network can be looked for", True, "zeroconf " + zeroconf.__version__)
+            except ImportError as e:
+                check("scanners on the network can be looked for", False, str(e))
+        t0 = time.time()
+        direct = escl_find(2.0)
+        lines.append(f"      scanners that answer by themselves: {[(d['name'], d['link']) for d in direct] or 'none'} ({time.time() - t0:.1f} s)")
         naps2 = Naps2(tmp)
         lines.append(f"      NAPS2: {' '.join(naps2.cmd) + ' ' + str(naps2.version) if naps2.cmd else 'not installed on this computer'}")
         if naps2.cmd:
