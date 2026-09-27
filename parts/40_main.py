@@ -979,7 +979,7 @@ class Main(QtWidgets.QMainWindow):
 
     def save_session(self):
         if self.session is None:
-            shutil.rmtree(self.session_dir, ignore_errors=True)
+            remove_tree(self.session_dir)
             return
         os.makedirs(self.session_dir, exist_ok=True)
         with open(self.session_file() + ".tmp", "w", encoding="utf-8") as f:
@@ -998,10 +998,10 @@ class Main(QtWidgets.QMainWindow):
         except (OSError, ValueError, KeyError):
             pass
         if self.session is None:
-            shutil.rmtree(self.session_dir, ignore_errors=True)
+            remove_tree(self.session_dir)
 
     def new_session(self, doc=None):
-        shutil.rmtree(self.session_dir, ignore_errors=True)
+        remove_tree(self.session_dir)
         os.makedirs(self.session_dir, exist_ok=True)
         self.session = {"doc": doc, "pages": [], "blank": [], "created": now_ms()}
 
@@ -1141,7 +1141,7 @@ class Main(QtWidgets.QMainWindow):
         self.say(_("bringing the pages in…"))
 
         def work(say):
-            shutil.rmtree(out, ignore_errors=True)
+            remove_tree(out)
             os.makedirs(out)
             files = []
             for p in paths:
@@ -1409,7 +1409,7 @@ def self_test(report):
         import traceback
         check("no surprise", False, f"{e!r} {traceback.format_exc()[-600:]}")
     finally:
-        shutil.rmtree(tmp, ignore_errors=True)
+        remove_tree(tmp)
     lines.append("FAILED: " + ", ".join(bad) if bad else "all good")
     out = "\n".join(lines) + "\n"
     if report and report != "-":

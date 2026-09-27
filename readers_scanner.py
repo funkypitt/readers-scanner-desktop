@@ -74,6 +74,15 @@ def remove(path):
     return _steady(os.remove, path)
 
 
+def remove_tree(path):
+    """A folder and what is in it; on Windows, asked again while a file of it is still open."""
+    for _attempt in range(40 if sys.platform == "win32" else 1):
+        shutil.rmtree(path, ignore_errors=True)
+        if not os.path.exists(path):
+            return
+        time.sleep(0.1)
+
+
 def quiet():
     """For every program started: on Windows, without this, a console window flashes each time."""
     return {"creationflags": 0x08000000} if sys.platform == "win32" else {}
@@ -630,14 +639,14 @@ class Store:
                     except OSError:
                         pass
                 self._texts.pop(doc["id"], None)
-                shutil.rmtree(os.path.join(self.dir(doc["id"]), "render"), ignore_errors=True)
+                remove_tree(os.path.join(self.dir(doc["id"]), "render"))
             keep = {"doc.pdf", "text.json", "render"}
             for p in doc.get("pages", []):
                 keep |= {p["id"] + ".jpg", p["id"] + ".src.jpg"}
             for name in os.listdir(self.dir(doc["id"])):
                 if name not in keep and not name.startswith("ocr-"):
                     path = os.path.join(self.dir(doc["id"]), name)
-                    shutil.rmtree(path, ignore_errors=True) if os.path.isdir(path) else remove(path)
+                    remove_tree(path) if os.path.isdir(path) else remove(path)
             self.docs[doc["id"]] = doc
             self._save()
 
@@ -660,7 +669,7 @@ class Store:
         with self.lock:
             self.docs.pop(doc_id, None)
             self._texts.pop(doc_id, None)
-            shutil.rmtree(self.dir(doc_id), ignore_errors=True)
+            remove_tree(self.dir(doc_id))
             self._save()
 
     def read_again(self, doc_id, lang=None):
@@ -716,7 +725,7 @@ class Store:
                     remove(self.pdf_file(doc["id"]))
                 except OSError:
                     pass
-                shutil.rmtree(os.path.join(self.dir(doc["id"]), "render"), ignore_errors=True)
+                remove_tree(os.path.join(self.dir(doc["id"]), "render"))
             self.docs[doc["id"]] = doc
             self._save()
 
@@ -727,7 +736,7 @@ class Store:
             for d in list(self.docs.values()):
                 if d.get("remote"):
                     self.docs.pop(d["id"])
-                    shutil.rmtree(self.dir(d["id"]), ignore_errors=True)
+                    remove_tree(self.dir(d["id"]))
             for f in self.folders:
                 f["onServer"] = False
             self.gone_folders = []
@@ -4380,7 +4389,7 @@ class Main(QtWidgets.QMainWindow):
 
     def save_session(self):
         if self.session is None:
-            shutil.rmtree(self.session_dir, ignore_errors=True)
+            remove_tree(self.session_dir)
             return
         os.makedirs(self.session_dir, exist_ok=True)
         with open(self.session_file() + ".tmp", "w", encoding="utf-8") as f:
@@ -4399,10 +4408,10 @@ class Main(QtWidgets.QMainWindow):
         except (OSError, ValueError, KeyError):
             pass
         if self.session is None:
-            shutil.rmtree(self.session_dir, ignore_errors=True)
+            remove_tree(self.session_dir)
 
     def new_session(self, doc=None):
-        shutil.rmtree(self.session_dir, ignore_errors=True)
+        remove_tree(self.session_dir)
         os.makedirs(self.session_dir, exist_ok=True)
         self.session = {"doc": doc, "pages": [], "blank": [], "created": now_ms()}
 
@@ -4542,7 +4551,7 @@ class Main(QtWidgets.QMainWindow):
         self.say(_("bringing the pages in…"))
 
         def work(say):
-            shutil.rmtree(out, ignore_errors=True)
+            remove_tree(out)
             os.makedirs(out)
             files = []
             for p in paths:
@@ -4810,7 +4819,7 @@ def self_test(report):
         import traceback
         check("no surprise", False, f"{e!r} {traceback.format_exc()[-600:]}")
     finally:
-        shutil.rmtree(tmp, ignore_errors=True)
+        remove_tree(tmp)
     lines.append("FAILED: " + ", ".join(bad) if bad else "all good")
     out = "\n".join(lines) + "\n"
     if report and report != "-":

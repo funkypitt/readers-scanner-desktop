@@ -74,6 +74,15 @@ def remove(path):
     return _steady(os.remove, path)
 
 
+def remove_tree(path):
+    """A folder and what is in it; on Windows, asked again while a file of it is still open."""
+    for _attempt in range(40 if sys.platform == "win32" else 1):
+        shutil.rmtree(path, ignore_errors=True)
+        if not os.path.exists(path):
+            return
+        time.sleep(0.1)
+
+
 def quiet():
     """For every program started: on Windows, without this, a console window flashes each time."""
     return {"creationflags": 0x08000000} if sys.platform == "win32" else {}
