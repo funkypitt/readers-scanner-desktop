@@ -86,6 +86,31 @@ both sides (phone: in the source, for the release after 1.1.0):
 Built and tested only on GitHub's machines (`.github/workflows/desktop-builds.yml`): there is no
 Windows or Mac here, and no runner has a scanner.
 
+State on 2026-09-27 (run 36330762778, commit 7057c6b): the four jobs pass — on each system the
+three test suites, the build, the built app's self-test (3.7 s on Windows, installed by its
+installer; on macOS taken out of its disk image), and the real NAPS2 installed on the runner
+(8.1.4 on Windows by Chocolatey, 8.3.2 on macOS by Homebrew): found, no scanner listed, « not
+found » understood on every driver, our own profile read. **No scan with a real scanner has
+been made on Windows or macOS.** Sizes: installer 85 MB, disk images 105 and 112 MB (Tesseract
+and its libraries 89 MB unpacked, of which ICU 30 and the models 27; PyQt5; numpy; pdfium).
+
+What Windows taught, all of it true of the app and not only of the tests:
+
+- **A file still open cannot be moved, replaced or deleted there.** Filing right after « + page »
+  failed because the page's thumbnail was being drawn. `move`, `replace`, `remove`,
+  `remove_tree` (parts/00_head.py) ask again for up to 4 s on Windows; nothing in the app calls
+  `shutil.move`, `os.replace`, `os.remove` or `shutil.rmtree` directly any more.
+- **An error nobody catches ends a PyQt5 program on the spot** (on every system). `unexpected`
+  is the app's `sys.excepthook`: the error goes to `errors.log` in the data folder and the
+  status line says so; the app goes on.
+- **A widget without parent belongs to Python**, which destroys it as soon as nothing names it:
+  `clear(layout)` did `setParent(None)`, and a click that emptied its own row destroyed the
+  button in the middle of its click. It survived on Linux and macOS by luck.
+- Python writes in cp1252 there unless told otherwise: the app names `utf-8` at every `open`,
+  the tests reconfigure their output.
+- Qt's « offscreen » platform has no fonts on Windows (every text is elided to nothing): the
+  window tests use the real desktop there.
+
 - **Tesseract travels with the app**: conda-forge's build (old systems too), gathered with the
   libraries it needs by `tools/bundle_tesseract.py`, with the models for orientation and English;
   the app finds it in `tesseract/` beside itself and tells it where its models are
