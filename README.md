@@ -4,8 +4,8 @@
 > It is not installed with the app: get it from naps2.com (`.deb`, `.rpm`, Flatpak, Windows,
 > macOS). Without it Reader's Scanner still files the pictures and PDFs you hand it, but cannot scan.
 
-> **State (2026-09-27): not released yet.** Tested against a stand-in for the scanner and against
-> the real NAPS2 without a scanner; not yet run on a real scanner. See [docs/NOTES.md](docs/NOTES.md).
+> **State (2026-09-27): not released yet.** Tested against a stand-in for the scanner and, in
+> part, on one real scanner (HP ScanJet Pro 4500 fn1, Linux). See [docs/NOTES.md](docs/NOTES.md).
 
 One window, one button. Put the sheets in the feeder or a page on the glass, press **scan**, press
 **Enter**: a searchable PDF, dated and named after its first words, filed in the folders you share
@@ -18,7 +18,7 @@ no account with the app, nothing leaves your computer except to your own WebDAV 
   belongs to. A name is optional: without one, the first words read on the page.
 - **Nothing to set up for a scan.** The scanner is found by itself and remembered. « automatic »
   takes the feeder when sheets are in it, the glass otherwise. 300 dpi colour, straightened.
-  With « both sides », blank backs are left out (and can be put back); sheets fed upside down
+  From the feeder, blank sheets and blank backs are left out (and can be put back); sheets fed upside down
   are set upright.
 - **The text is read on this computer** (Tesseract), in the language chosen under the button;
   the most accurate model for that language is fetched once, by itself. The PDF keeps the page as

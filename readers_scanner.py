@@ -245,6 +245,7 @@ _T = {
  "nothing could be read in these files": ("rien n'a pu être lu dans ces fichiers", "in diesen dateien war nichts lesbar", "no se pudo leer nada en estos archivos", "não foi possível ler nada nestes ficheiros", "в этих файлах ничего не удалось прочитать"),
  "synced %1": ("synchronisé %1", "synchronisiert %1", "sincronizado %1", "sincronizado %1", "синхр. %1"),
  "no scanner found yet": ("pas encore de scanner", "noch kein scanner gefunden", "aún sin escáner", "ainda sem digitalizador", "сканер пока не найден"),
+ "the scanner is getting ready…": ("le scanner se prépare…", "der scanner macht sich bereit…", "el escáner se prepara…", "o digitalizador prepara-se…", "сканер готовится…"),
  "syncing…": ("synchronisation…", "synchronisiert…", "sincronizando…", "a sincronizar…", "синхронизация…"),
  "on this computer only": ("sur cet ordinateur seulement", "nur auf diesem computer", "solo en este ordenador", "só neste computador", "только на этом компьютере"),
  "Ctrl+, to set up a WebDAV folder shared with the phone": ("Ctrl+, pour configurer un dossier WebDAV partagé avec le téléphone", "Strg+, um einen mit dem telefon geteilten WebDAV-ordner einzurichten", "Ctrl+, para configurar una carpeta WebDAV compartida con el teléfono", "Ctrl+, para configurar uma pasta WebDAV partilhada com o telemóvel", "Ctrl+, — настроить папку WebDAV, общую с телефоном"),
@@ -2380,7 +2381,7 @@ class Naps2:
     <IsDefault>true</IsDefault>
     <BitDepth>C24Bit</BitDepth>
     <PageSize>{pagesize}</PageSize>
-    <Resolution><Dpi>{DPI}</Dpi></Resolution>
+    <Resolution>Dpi{DPI}</Resolution>
     <PaperSource>{source.capitalize()}</PaperSource>
     <AutoDeskew>{"true" if deskew else "false"}</AutoDeskew>
     <Quality>{JPEG_QUALITY}</Quality>
@@ -2476,10 +2477,15 @@ def scan_pages(naps2, cfg, source, out_dir, on_page=None, on_state=None):
         while tries:
             route = tries.pop(0)
             on_state and on_state(src)
-            files, err, said = naps2.scan(route, src, pagesize, out_dir, on_page)
+            for patience in range(5):      # just after a scan the scanner may still be busy: a moment, not an error
+                files, err, said = naps2.scan(route, src, pagesize, out_dir, on_page)
+                if err not in ("busy", "warming") or patience == 4:
+                    break
+                on_state and on_state("waiting")
+                time.sleep(2.5)
             if files:
                 blank = []
-                if src == "duplex":
+                if src in ("feeder", "duplex"):      # the backs of one-sided sheets, a separator sheet
                     blank = [f for f in files if is_blank(f)]
                     if len(blank) == len(files):
                         blank = []             # a stack of empty sheets is what was asked for
@@ -2521,7 +2527,7 @@ def pick_routes(devices, key):
 
 def load_config():
     try:
-        with open(CONFIG_FILE) as f:
+        with open(CONFIG_FILE, encoding="utf-8") as f:
             return json.load(f)
     except (OSError, ValueError):
         return {}
@@ -2530,7 +2536,7 @@ def load_config():
 def save_config(cfg):
     os.makedirs(CONFIG_DIR, mode=0o700, exist_ok=True)
     tmp = CONFIG_FILE + ".tmp"
-    with open(tmp, "w") as f:
+    with open(tmp, "w", encoding="utf-8") as f:
         json.dump(cfg, f, indent=2)
     os.chmod(tmp, 0o600)
     os.replace(tmp, CONFIG_FILE)
@@ -4281,6 +4287,8 @@ class Main(QtWidgets.QMainWindow):
             self.message.title.setText(_("page %1", value))
         elif value == "upright":
             self.message.sub.setText(_("setting the pages upright…")); self.message.sub.setVisible(True)
+        elif value == "waiting":
+            self.message.sub.setText(_("the scanner is getting ready…")); self.message.sub.setVisible(True)
         elif value == "searching":
             self.message.title.setText(_("scanning…"))
             self.message.sub.setText(_("looking for the scanner…")); self.message.sub.setVisible(True)

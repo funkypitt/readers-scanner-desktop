@@ -9,6 +9,7 @@ TMP = os.path.realpath(tempfile.mkdtemp(prefix="rs-test-")).replace("\\", "/")
 os.environ.update(READERS_SCANNER_HOME=TMP, READERS_SCANNER_DRIVER="sane", FAKE_SCANNER=TMP + "/scanner", LANG="en_US.UTF-8", LC_ALL="en_US.UTF-8",
                   READERS_SCANNER_NAPS2=f"{PY} {HERE}/fake_naps2.py", READERS_SCANNER_SCANIMAGE=f"{PY} {HERE}/fake_scanimage.py")
 sys.path.insert(0, os.path.dirname(HERE))
+sys.stdout.reconfigure(encoding="utf-8", line_buffering=True)
 import readers_scanner as rs
 
 PAGES = TMP + "/pages"
@@ -90,6 +91,7 @@ scanner(feeder=["facture-1.jpg", "facture-2.jpg"], glass="contrat.jpg")
 seen = []
 r = rs.scan_pages(n, cfg, "auto", out, on_page=seen.append)
 check("automatic: paper in the feeder → the feeder, both pages", r["error"] is None and r["source"] == "feeder" and len(r["files"]) == 2 and seen == [1, 2], str(r))
+check("the pages come at 300 dpi, the size of the sheet", [Image.open(f).size for f in r["files"]] == [(2480, 3508)] * 2, str([Image.open(f).size for f in r["files"]]))
 check("the scanner is remembered with its ways", r["device"]["routes"][0]["backend"] == "airscan" and len(r["device"]["routes"]) == 3)
 cfg["device"] = r["device"]
 check("no search for scanners once one is known (a profile names it)", not any("--listdevices" in l or "--device" in l for l in log()) and any("-p readers-scanner" in l for l in log()))
@@ -109,6 +111,12 @@ check("feeder asked, feeder empty → said so", r["error"] == "empty" and rs.err
 scanner(feeder=["facture-1.jpg", "blank.jpg", "facture-2.jpg", "blank-showthrough.jpg"])
 r = rs.scan_pages(n, cfg, "duplex", out)
 check("both sides: the two blank backs left out, kept aside", r["error"] is None and len(r["files"]) == 2 and len(r["blank"]) == 2, str(r))
+
+scanner(feeder=["facture-1.jpg"])
+open(SC + "/busy", "w").write("2")
+states = []
+r = rs.scan_pages(n, cfg, "auto", out, on_state=states.append)
+check("the scanner still busy with the scan before: a moment's patience, then the pages", r["error"] is None and len(r["files"]) == 1 and states.count("waiting") == 2, f"{r} {states}")
 
 scanner(feeder=["facture-1.jpg"], flags=["offline-airscan"])
 r = rs.scan_pages(n, cfg, "auto", out)
@@ -229,7 +237,7 @@ check("a word found in the PDF lies where it is printed on the page", bool(m) an
 b = file_doc(["vertrag.jpg"], lang="deu", name="Mietvertrag Zürich")
 d, took = wait(b, 240)
 ok = d["ocr"] == rs.DONE
-check(f"German, which the system does not have ({took:.1f} s), the user's name kept", ok and d["name"] == "Mietvertrag Zürich" and d["readBy"] == "tesseract-best"
+check(f"German, read with the most accurate model ({took:.1f} s), the user's name kept", ok and d["name"] == "Mietvertrag Zürich" and d["readBy"] == "tesseract-best"
       and "Nebenkosten" in store.text(b)[0], str(d) + str(q.errors))
 
 ru = file_doc(["facture-1.jpg"], lang="rus")

@@ -9,11 +9,23 @@ Validated by the three test suites (engine, window driven offscreen, two compute
 server) and by a live exchange with the Android app 1.1.0 on an emulator: a desktop scan received
 and displayed by the phone, a rename on the phone followed by the desktop.
 
-**Not yet run against a real scanner.** The HP ScanJet Pro 4500 fn1 was switched off on the days
-of the build. Acquisition is tested against `tests/fake_naps2.py`, written from NAPS2's source
-(v8.2.1: its messages, its exit code, when it writes the files); the private-profile mechanism
-below was run against the real NAPS2 binary, up to "The selected scanner is offline." First
-thing to do with the scanner on: feeder, glass, both sides, empty feeder, cancel.
+**Run on the real scanner on 2026-09-27** (HP ScanJet Pro 4500 fn1, USB, through the window:
+« scan », Enter). What it taught, which the stand-in has learnt since:
+
+- NAPS2 writes a profile's resolution as `<Resolution>Dpi300</Resolution>`. A number in a tag
+  is not understood, and the driver then takes its lowest resolution: the first real pages came
+  at 75 dpi (620 × 877). The stand-in now does the same, and a test checks the pages' size.
+- Right after a scan the scanner may answer « busy » for a moment: waited for (5 tries, 2.5 s
+  apart, « the scanner is getting ready… »), not reported.
+- Blank sheets in a one-sided stack happen too (7 of the 8 sheets of that first stack): left
+  out and kept aside in every feeder scan, not only with both sides.
+- Measured: scanner found in 12 s at the first start, then never looked for again; 8 sheets
+  from the feeder in 26 s (at 75 dpi); the glass at 300 dpi in 10.6 s; empty feeder noticed in
+  2.5 s, « automatic » then on the glass: 12 s in all; « feeder » asked and empty: said in 2.5 s.
+- Of the five routes to that scanner, airscan works; escl and hpaio answer « busy » or
+  « interrupted » while airscan has just been used. The order tried is the right one.
+
+Still to run on it: a printed stack at 300 dpi (reading, upright), both sides, cancel.
 
 ## NAPS2, as it is driven
 

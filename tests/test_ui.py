@@ -14,6 +14,7 @@ os.environ.update(READERS_SCANNER_HOME=TMP, READERS_SCANNER_DRIVER="sane", FAKE_
 if sys.platform != "win32":          # Windows runners have a desktop, and its fonts
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 sys.path.insert(0, os.path.dirname(HERE))
+sys.stdout.reconfigure(encoding="utf-8", line_buffering=True)
 import readers_scanner as rs
 from PyQt5 import QtCore, QtWidgets, QtTest
 
@@ -22,7 +23,6 @@ PAGES = TMP + "/pages"
 subprocess.run([PY, HERE + "/make_pages.py", PAGES], check=True)
 SC = os.environ["FAKE_SCANNER"]
 failed, clicks = [], 0
-sys.stdout.reconfigure(line_buffering=True)
 
 
 def check(label, cond, detail=""):

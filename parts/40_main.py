@@ -918,6 +918,8 @@ class Main(QtWidgets.QMainWindow):
             self.message.title.setText(_("page %1", value))
         elif value == "upright":
             self.message.sub.setText(_("setting the pages upright…")); self.message.sub.setVisible(True)
+        elif value == "waiting":
+            self.message.sub.setText(_("the scanner is getting ready…")); self.message.sub.setVisible(True)
         elif value == "searching":
             self.message.title.setText(_("scanning…"))
             self.message.sub.setText(_("looking for the scanner…")); self.message.sub.setVisible(True)

@@ -7,7 +7,7 @@
 
 def load_config():
     try:
-        with open(CONFIG_FILE) as f:
+        with open(CONFIG_FILE, encoding="utf-8") as f:
             return json.load(f)
     except (OSError, ValueError):
         return {}
@@ -16,7 +16,7 @@ def load_config():
 def save_config(cfg):
     os.makedirs(CONFIG_DIR, mode=0o700, exist_ok=True)
     tmp = CONFIG_FILE + ".tmp"
-    with open(tmp, "w") as f:
+    with open(tmp, "w", encoding="utf-8") as f:
         json.dump(cfg, f, indent=2)
     os.chmod(tmp, 0o600)
     os.replace(tmp, CONFIG_FILE)

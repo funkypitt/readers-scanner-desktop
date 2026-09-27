@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Gathers Tesseract as the Windows and macOS builds carry it: the program, the libraries it
-needs and no others, the models for the orientation and for English (the other languages are
-fetched by the app, the most accurate ones, when they are first needed).
+needs and no others, the small models of the app's languages and the one for the orientation:
+a first scan reads without the network (the most accurate models are fetched by the app when
+it can).
 
     tools/bundle_tesseract.py PREFIX OUT
 
@@ -75,7 +76,7 @@ else:
     gather(os.path.realpath(os.path.join(PREFIX, "bin", "tesseract")), exe)
 
 os.makedirs(os.path.join(OUT, "tessdata"))
-for lang in ("eng", "osd"):
+for lang in ("eng", "fra", "deu", "ita", "spa", "por", "rus", "osd"):
     urllib.request.urlretrieve(MODELS % lang, os.path.join(OUT, "tessdata", lang + ".traineddata"))
 
 # whose files these are
@@ -91,7 +92,7 @@ with open(os.path.join(OUT, "LICENSES.txt"), "w", encoding="utf-8") as f:
             "Each package's own licence text is in its source, linked from https://anaconda.org/conda-forge/<name>.\n\n")
     for name, version, licence in packages:
         f.write(f"{name} {version}: {licence}\n")
-    f.write("\ntessdata/eng.traineddata, tessdata/osd.traineddata: https://github.com/tesseract-ocr/tessdata_fast (Apache-2.0)\n")
+    f.write("\ntessdata/*.traineddata: https://github.com/tesseract-ocr/tessdata_fast (Apache-2.0)\n")
 
 size = sum(os.path.getsize(os.path.join(r, f)) for r, _d, fs in os.walk(OUT) for f in fs)
 print(f"{len(taken)} libraries from {len(packages)} packages, {size / 1e6:.0f} MB in {OUT}")

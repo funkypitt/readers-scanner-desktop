@@ -22,7 +22,7 @@ Section: graphics
 Priority: optional
 Architecture: all
 Depends: python3 (>= 3.8), python3-pyqt5, python3-requests, python3-pil, python3-numpy, tesseract-ocr, poppler-utils
-Recommends: naps2, sane-utils
+Recommends: naps2, sane-utils, tesseract-ocr-osd
 Maintainer: funkypitt <pierregallaz@gmail.com>
 Homepage: https://github.com/funkypitt/readers-scanner-desktop
 Description: One-click scanning to searchable PDFs, filed with the phone's (needs NAPS2)

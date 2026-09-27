@@ -752,7 +752,7 @@ class Naps2:
     <IsDefault>true</IsDefault>
     <BitDepth>C24Bit</BitDepth>
     <PageSize>{pagesize}</PageSize>
-    <Resolution><Dpi>{DPI}</Dpi></Resolution>
+    <Resolution>Dpi{DPI}</Resolution>
     <PaperSource>{source.capitalize()}</PaperSource>
     <AutoDeskew>{"true" if deskew else "false"}</AutoDeskew>
     <Quality>{JPEG_QUALITY}</Quality>
@@ -848,10 +848,15 @@ def scan_pages(naps2, cfg, source, out_dir, on_page=None, on_state=None):
         while tries:
             route = tries.pop(0)
             on_state and on_state(src)
-            files, err, said = naps2.scan(route, src, pagesize, out_dir, on_page)
+            for patience in range(5):      # just after a scan the scanner may still be busy: a moment, not an error
+                files, err, said = naps2.scan(route, src, pagesize, out_dir, on_page)
+                if err not in ("busy", "warming") or patience == 4:
+                    break
+                on_state and on_state("waiting")
+                time.sleep(2.5)
             if files:
                 blank = []
-                if src == "duplex":
+                if src in ("feeder", "duplex"):      # the backs of one-sided sheets, a separator sheet
                     blank = [f for f in files if is_blank(f)]
                     if len(blank) == len(files):
                         blank = []             # a stack of empty sheets is what was asked for

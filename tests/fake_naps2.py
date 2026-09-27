@@ -7,6 +7,7 @@ English messages), pages taken from a folder instead of a scanner.
   $FAKE_SCANNER/glass.jpg     what lies on the glass
   $FAKE_SCANNER/offline       (a file) the scanner does not answer; "offline-<backend>": on that driver only
   $FAKE_SCANNER/nofeeder      the scanner has no feeder
+  $FAKE_SCANNER/busy          a number: the scanner says it is busy that many times, then scans
   $FAKE_SCANNER/slow          seconds per page (a number in the file)
   $FAKE_SCANNER/speaks        a language ("fr") and a code page ("cp850"): as on Windows, where NAPS2
                               answers in the system's language whatever it is asked
@@ -78,7 +79,7 @@ if "--listdevices" in args:
             print(display(d))
     sys.exit(0)
 
-source, device_id, name = "glass", None, None
+source, device_id, name, dpi = "glass", None, None, 200
 if "-p" in args or "--profile" in args:
     data = os.environ.get("NAPS2_TEST_DATA", "")
     try:
@@ -89,9 +90,14 @@ if "-p" in args or "--profile" in args:
         print("The specified profile is unavailable or ambiguous."); sys.exit(0)
     device_id = re.search(r"<ID>(.*?)</ID>", xml).group(1).replace("&amp;", "&")
     source = re.search(r"<PaperSource>(.*?)</PaperSource>", xml).group(1).lower()
+    # NAPS2 writes « Dpi300 »; anything else it does not understand, and the driver then takes
+    # its lowest resolution (seen on the real scanner: 75 dpi, pages of 620 × 877)
+    m = re.search(r"<Resolution>Dpi(\d+)</Resolution>", xml)
+    dpi = int(m.group(1)) if m else 75
 else:
     name = opt("--device")
     source = opt("--source", "glass")
+    dpi = int(opt("--dpi", "200"))
     time.sleep(0.3)          # NAPS2 looks for the scanners first
     match = [d for d in devices() if name and name.lower() in display(d).lower()]
     if not match:
@@ -114,6 +120,13 @@ def fail(words):
 
 if os.path.exists(os.path.join(root, "offline")) or os.path.exists(os.path.join(root, "offline-" + backend)) or device_id not in known:
     fail("The selected scanner is offline.")
+try:
+    busy = int(open(os.path.join(root, "busy")).read())
+except (OSError, ValueError):
+    busy = 0
+if busy > 0:
+    open(os.path.join(root, "busy"), "w").write(str(busy - 1))
+    fail("The selected scanner is busy.")
 pages = []
 if source in ("feeder", "duplex"):
     if os.path.exists(os.path.join(root, "nofeeder")):
@@ -139,7 +152,12 @@ if not pages:
 print("Exporting...")
 for i, p in enumerate(pages):
     dst = out.replace("$(nnnn)", f"{i + 1:04d}")
-    shutil.copyfile(p, dst)
+    if dpi == 300:
+        shutil.copyfile(p, dst)          # the tests' pages are 300 dpi
+    else:
+        from PIL import Image
+        im = Image.open(p)
+        im.resize((im.width * dpi // 300, im.height * dpi // 300)).save(dst, "JPEG", quality=85, dpi=(dpi, dpi))
     print(f"Exporting image {i + 1} of {len(pages)}...")
     if source in ("feeder", "duplex"):
         os.remove(p)

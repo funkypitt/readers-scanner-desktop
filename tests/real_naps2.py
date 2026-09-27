@@ -5,7 +5,7 @@ understood. Run: python3 tests/real_naps2.py"""
 import os, sys, tempfile, time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-sys.stdout.reconfigure(line_buffering=True)
+sys.stdout.reconfigure(encoding="utf-8", line_buffering=True)
 import readers_scanner as rs
 
 failed = []
