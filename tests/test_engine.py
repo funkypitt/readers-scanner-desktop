@@ -229,6 +229,12 @@ for f in r["files"]:
         im.load()                      # a strict reading: a file that announces more lines than it holds fails here
         sizes.append((im.size, im.info.get("dpi")))
 check("a file announcing more lines than it holds is set right: any program reads it", r["error"] is None and sizes == [((2480, 3472), (300, 300))] * 2, str(sizes))
+rs.write_pdf(r["files"], TMP + "/short.pdf", "short", [[[("Facture", 230, 260, 900, 370)]], []])
+info = subprocess.run(["pdfinfo", TMP + "/short.pdf"], capture_output=True, text=True).stdout
+boxes = subprocess.run(["pdftotext", "-bbox", "-f", "1", "-l", "1", TMP + "/short.pdf", "-"], capture_output=True, text=True).stdout
+import re as _re
+m = _re.search(r'yMin="([\d.]+)" xMax="[\d.]+" yMax="([\d.]+)">Facture<', boxes)
+check("a sheet scanned a little short is an A4 page all the same, its words where they are printed", "(A4)" in info and bool(m) and 50 < float(m.group(1)) < 75 and 80 < float(m.group(2)) < 100, info + str(m and m.groups()))
 check("and much lighter than the scanner made it", all(os.path.getsize(f) < 1_500_000 for f in r["files"]), str([os.path.getsize(f) for f in r["files"]]))
 turn = rs.upright_rotations(r["files"], rs.Reader(rs.DATA_DIR))
 check("so the sheet fed upside down is seen", turn == {r["files"][0]: 180}, str(turn))

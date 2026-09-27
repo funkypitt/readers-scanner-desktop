@@ -1859,15 +1859,19 @@ def write_pdf(pages, out, title="", layers=None):
             data, space = buf.getvalue(), "/DeviceRGB"
         k = page_inches(path, w, h) * 72.0 / w          # points per pixel
         pw, ph = w * k, h * k
+        # a feeder scans a little less than the sheet (3472 lines of an A4's 3508): the page is
+        # the sheet all the same, the picture at its top, the few missing millimetres white
+        sheet = next((s for s in ((595.28, 841.89), (612.0, 792.0)) if abs(pw - s[0]) < 3 and 0 < s[1] - ph < 0.03 * s[1]), None)
+        full = sheet[1] if sheet else ph
         image = add(stream(data, f"/Type /XObject /Subtype /Image /Width {w} /Height {h} /ColorSpace {space} /BitsPerComponent 8 /Filter /DCTDecode"))
-        ops = [f"q {pw:.2f} 0 0 {ph:.2f} 0 0 cm /Im0 Do Q"]
+        ops = [f"q {pw:.2f} 0 0 {ph:.2f} 0 {full - ph:.2f} cm /Im0 Do Q"]
         lines = (layers[i] if layers and i < len(layers) else None) or []
         if lines and font:
             ops.append("BT 3 Tr")
             for line in lines:
                 top, bottom = min(wd[2] for wd in line), max(wd[4] for wd in line)
                 size = max(3.0, (bottom - top) * k * 0.8)
-                base = ph - (top + (bottom - top) * 0.8) * k
+                base = full - (top + (bottom - top) * 0.8) * k
                 for j, (text, left, _t, right, _b) in enumerate(line):
                     text += " "
                     units = len(text.encode("utf-16-be")) // 2
@@ -1877,7 +1881,7 @@ def write_pdf(pages, out, title="", layers=None):
             ops.append("ET")
         content = add(stream(zlib.compress("\n".join(ops).encode("latin-1")), "/Filter /FlateDecode"))
         fonts = f"/Font << /F0 {font} 0 R >> " if font else ""
-        kids.append(add(f"<< /Type /Page /Parent {tree} 0 R /MediaBox [ 0 0 {pw:.2f} {ph:.2f} ] /Contents {content} 0 R "
+        kids.append(add(f"<< /Type /Page /Parent {tree} 0 R /MediaBox [ 0 0 {pw:.2f} {full:.2f} ] /Contents {content} 0 R "
                         f"/Resources << /XObject << /Im0 {image} 0 R >> {fonts}>> >>"))
     if not kids:
         return None

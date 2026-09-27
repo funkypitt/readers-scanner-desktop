@@ -85,8 +85,16 @@ escl had given one page, three times. What that scan taught:
   The scanner's own `CompressionFactor` (0 to 11 on this one) means something else on every
   model and was left alone.
 
-Not yet run directly on the real scanner: cancel in the middle of a stack; the whole chain
-again after these two corrections (they were checked on the files of the 19:11 scan).
+**The whole chain again, after the corrections (19:51)**: the same stack, 8 sides in 11.8 s, 3
+blank backs left out, the sheet fed upside down turned by itself, the five pages read in 8.4 s,
+a PDF of 4.9 MB that Ghostscript and poppler accept, its text layer the words read (1109 of
+1111).
+
+- A page scanned a little short (3472 lines) made a PDF page 3 mm shorter than A4: `write_pdf`
+  now makes the page the sheet (A4 or Letter) when the picture is within 3 % of it, the picture
+  at the top.
+
+Not yet run on the real scanner: cancel in the middle of a stack.
 
 ## NAPS2, as it is driven
 
