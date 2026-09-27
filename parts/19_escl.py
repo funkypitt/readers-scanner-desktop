@@ -13,6 +13,78 @@ _ADF_STATES = {   # what the scanner says of its feeder → our word for it
 }
 
 
+def jpeg_mend(path):
+    """A feeder does not know how long a sheet is before it has passed: scanners announce the
+    height asked for and send the lines they saw, fewer (3472 for 3508 on the HP ScanJet Pro
+    4500 fn1). Tolerant readers fill the rest with grey, strict ones refuse the file (Tesseract
+    does). The height written in the file is set to the lines that are there — counted from its
+    restart markers, the picture itself untouched. Returns the height, or None when the file
+    was left as it is."""
+    try:
+        with open(path, "rb") as f:
+            b = f.read()
+        if b[:2] != b"\xff\xd8":
+            return None
+        i, frame, every, start = 2, None, 0, None
+        while i + 4 <= len(b) and b[i] == 0xFF:
+            kind, size = b[i + 1], int.from_bytes(b[i + 2:i + 4], "big")
+            if kind in (0xC0, 0xC1):                   # the frame: height, width, the components' sampling
+                frame = i
+            elif kind == 0xC2:
+                return None                            # progressive: not what a scanner sends, left alone
+            elif kind == 0xDD:
+                every = int.from_bytes(b[i + 4:i + 6], "big")
+            elif kind == 0xDA:
+                start = i + 2 + size
+                break
+            i += 2 + size
+        if frame is None or start is None or not every:
+            return None
+        height, width = int.from_bytes(b[frame + 5:frame + 7], "big"), int.from_bytes(b[frame + 7:frame + 9], "big")
+        parts = [b[frame + 11 + 3 * k] for k in range(b[frame + 9])]
+        across, down = 8 * max(p >> 4 for p in parts), 8 * max(p & 15 for p in parts)
+        in_a_row = -(-width // across)
+        restarts, at = 0, b.find(b"\xff", start)
+        while at != -1 and at + 1 < len(b):
+            if 0xD0 <= b[at + 1] <= 0xD7:
+                restarts += 1
+            at = b.find(b"\xff", at + 2)
+        there = ((restarts + 1) * every // in_a_row) * down
+        if not 0 < there < height or height - there > height // 2:
+            return None                                # whole, or too strange to be mended this way
+        with open(path, "r+b") as f:
+            f.seek(frame + 5)
+            f.write(there.to_bytes(2, "big"))
+        return there
+    except (OSError, IndexError, ValueError):
+        return None
+
+
+def jpeg_slim(path, dpi):
+    """Scanners compress lightly: five pages weighed 19 MB from the HP ScanJet Pro 4500 fn1, a lot
+    to keep, to send and to open on a phone. A page much heavier than it needs to be is written
+    again at the quality the app uses everywhere (what NAPS2 did to every page); one that would
+    gain little is left as the scanner made it. Returns the bytes saved."""
+    try:
+        before = os.path.getsize(path)
+        with Image.open(path) as im:
+            im.load()
+            if im.mode not in ("L", "RGB"):
+                im = im.convert("RGB")
+            im.save(path + ".slim", "JPEG", quality=JPEG_QUALITY, optimize=True, dpi=(dpi, dpi))
+        after = os.path.getsize(path + ".slim")
+        if after < before * 0.65:
+            replace(path + ".slim", path)
+            return before - after
+        remove(path + ".slim")
+    except (OSError, ValueError):
+        try:
+            remove(path + ".slim")
+        except OSError:
+            pass
+    return 0
+
+
 class EsclError(Exception):
     def __init__(self, code, words=""):
         super().__init__(words or code)
@@ -179,6 +251,8 @@ class Escl:
                     with open(out, "wb") as f:
                         f.write(page.content)
                     self._stamp(out, dpi)
+                    jpeg_mend(out)
+                    jpeg_slim(out, dpi)
                     files.append(out)
                     quiet_tries = 0
                     on_page and on_page(len(files))

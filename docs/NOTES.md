@@ -70,7 +70,23 @@ once against 2.5 s; a scan right after another in 14.7 s against 26–32 s.
 - `READERS_SCANNER_DIRECT` (addresses, or empty for none) replaces the search in the tests:
   without it they would find the real scanner on the desk.
 
-Not yet run directly on the real scanner: a stack in the feeder, both sides, cancel.
+**A stack, both sides, on the real scanner (2026-09-27, 19:11)**: 4 sheets, 8 sides in 10.9 s,
+3 blank backs left out, 5 pages kept, read in 9.8 s. The same stack through NAPS2 and sane's
+escl had given one page, three times. What that scan taught:
+
+- From its feeder the scanner announces 3508 lines in each JPEG and sends 3472 or 3488: a
+  feeder does not know a sheet's length before it has passed. Tolerant readers (Pillow, Qt,
+  poppler) fill the rest with grey; Tesseract's refuses the file, so no page was ever set
+  upright. `jpeg_mend` counts the restart markers and writes the true height in the header, the
+  picture untouched (checked on the five real files: same pixels but the last line). After it,
+  the sheet fed upside down was seen (turn 180, confidence 17).
+- Its pictures are lightly compressed: 19 MB for the five pages. `jpeg_slim` writes a page again
+  at the app's quality (85) when that takes off more than a third: 4.8 MB, the same words read.
+  The scanner's own `CompressionFactor` (0 to 11 on this one) means something else on every
+  model and was left alone.
+
+Not yet run directly on the real scanner: cancel in the middle of a stack; the whole chain
+again after these two corrections (they were checked on the files of the 19:11 scan).
 
 ## NAPS2, as it is driven
 

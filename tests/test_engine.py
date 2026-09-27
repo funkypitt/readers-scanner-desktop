@@ -220,6 +220,22 @@ t0 = time.time()
 r = rs.scan_pages(d, known, "feeder", out)
 check("cancel: the scanner is told, the sheets not yet taken stay in the feeder", r["error"] == "cancelled" and any(a.startswith("DELETE /eSCL/ScanJobs/") for a in asked())
       and 1 <= len(os.listdir(SC + "/feeder")) <= 4 and time.time() - t0 < 3, f"{r} {asked()[-3:]} {os.listdir(SC + '/feeder')}")
+# the pictures as the real scanner sends them
+scanner(feeder=["upside-down.jpg", "facture-1.jpg"], flags=["asreal"])
+r = rs.scan_pages(d, known, "feeder", out)
+sizes = []
+for f in r["files"]:
+    with Image.open(f) as im:
+        im.load()                      # a strict reading: a file that announces more lines than it holds fails here
+        sizes.append((im.size, im.info.get("dpi")))
+check("a file announcing more lines than it holds is set right: any program reads it", r["error"] is None and sizes == [((2480, 3472), (300, 300))] * 2, str(sizes))
+check("and much lighter than the scanner made it", all(os.path.getsize(f) < 1_500_000 for f in r["files"]), str([os.path.getsize(f) for f in r["files"]]))
+turn = rs.upright_rotations(r["files"], rs.Reader(rs.DATA_DIR))
+check("so the sheet fed upside down is seen", turn == {r["files"][0]: 180}, str(turn))
+whole = TMP + "/whole.jpg"
+shutil.copyfile(PAGES + "/facture-1.jpg", whole)
+check("a whole and light picture is left as it is, byte for byte", rs.jpeg_mend(whole) is None and rs.jpeg_slim(whole, 300) == 0 and open(whole, "rb").read() == open(PAGES + "/facture-1.jpg", "rb").read())
+
 # plugged in and on the network: two ways to one scanner
 cable = url.replace("127.0.0.1", "localhost")
 os.environ["READERS_SCANNER_DIRECT"] = f"{url},{cable}"

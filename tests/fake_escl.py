@@ -8,6 +8,8 @@ from the same folder as tests/fake_naps2.py:
   $FAKE_SCANNER/nofeeder      the scanner has no feeder
   $FAKE_SCANNER/busy          a number: « 503 » that many times before a scan starts
   $FAKE_SCANNER/jam, multipick  what the feeder says went wrong
+  $FAKE_SCANNER/asreal        the pictures as the real scanner sends them from its feeder: lightly
+                              compressed, and announcing 3508 lines where they hold 3472
   $FAKE_SCANNER/slow          seconds per page
   $FAKE_SCANNER/direct.txt    every request, for the tests to read
 
@@ -126,6 +128,15 @@ def serve(root, port=0):
                 out = io.BytesIO()
                 im.resize((im.width * job["dpi"] // 300, im.height * job["dpi"] // 300)).save(out, "JPEG", quality=85)
                 data = out.getvalue()
+            if os.path.exists(here("asreal")):
+                from PIL import Image
+                im = Image.open(io.BytesIO(data)).convert("RGB")
+                out = io.BytesIO()
+                im.crop((0, 0, im.width, 3472)).save(out, "JPEG", quality=97, subsampling=2, restart_marker_rows=1)
+                data = bytearray(out.getvalue())
+                at = data.find(b"\xff\xc0")
+                data[at + 5:at + 7] = (3508).to_bytes(2, "big")
+                data = bytes(data)
             if job["feeder"]:
                 os.remove(page)
             job["given"] += 1
