@@ -49,6 +49,31 @@ def _app_dirs():
             os.path.join(os.environ.get("XDG_DATA_HOME", os.path.expanduser("~/.local/share")), APP))
 
 
+def _steady(act, *args):
+    """Windows refuses to move, replace or delete a file that anything still has open — a
+    thumbnail being drawn, an antivirus looking at a new file. It is a matter of a moment: asked
+    again for a few seconds before it is an error. Elsewhere an open file moves like any other."""
+    for attempt in range(40 if sys.platform == "win32" else 1):
+        try:
+            return act(*args)
+        except PermissionError:
+            if attempt == (39 if sys.platform == "win32" else 0):
+                raise
+            time.sleep(0.1)
+
+
+def move(src, dst):
+    return _steady(shutil.move, src, dst)
+
+
+def replace(src, dst):
+    return _steady(os.replace, src, dst)
+
+
+def remove(path):
+    return _steady(os.remove, path)
+
+
 def quiet():
     """For every program started: on Windows, without this, a console window flashes each time."""
     return {"creationflags": 0x08000000} if sys.platform == "win32" else {}

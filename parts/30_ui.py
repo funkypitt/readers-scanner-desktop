@@ -19,7 +19,7 @@ def save_config(cfg):
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(cfg, f, indent=2)
     os.chmod(tmp, 0o600)
-    os.replace(tmp, CONFIG_FILE)
+    replace(tmp, CONFIG_FILE)
 
 
 CREDENTIAL_KEYS = ("server", "folder", "username", "password")
@@ -44,7 +44,7 @@ def export_credentials(cfg, path):
     fd = os.open(path + ".tmp", os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
-    os.replace(path + ".tmp", path)
+    replace(path + ".tmp", path)
     return path
 
 

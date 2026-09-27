@@ -151,7 +151,7 @@ class Store:
         tmp = self.index_file + ".tmp"
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump({"docs": list(self.docs.values()), "folders": self.folders, "goneFolders": self.gone_folders}, f, indent=1, ensure_ascii=False)
-        os.replace(tmp, self.index_file)
+        replace(tmp, self.index_file)
         if self.on_change:
             self.on_change()
 
@@ -189,7 +189,7 @@ class Store:
         path = os.path.join(self.dir(doc_id), "text.json")
         with open(path + ".tmp", "w", encoding="utf-8") as f:
             json.dump(pages, f, ensure_ascii=False)
-        os.replace(path + ".tmp", path)
+        replace(path + ".tmp", path)
         self._texts[doc_id] = list(pages)
 
     # ---- reading ----------------------------------------------------------------------
@@ -335,7 +335,7 @@ class Store:
                 # new pages: the old text and PDF no longer match them
                 for name in ("doc.pdf", "text.json"):
                     try:
-                        os.remove(os.path.join(self.dir(doc["id"]), name))
+                        remove(os.path.join(self.dir(doc["id"]), name))
                     except OSError:
                         pass
                 self._texts.pop(doc["id"], None)
@@ -346,7 +346,7 @@ class Store:
             for name in os.listdir(self.dir(doc["id"])):
                 if name not in keep and not name.startswith("ocr-"):
                     path = os.path.join(self.dir(doc["id"]), name)
-                    shutil.rmtree(path, ignore_errors=True) if os.path.isdir(path) else os.remove(path)
+                    shutil.rmtree(path, ignore_errors=True) if os.path.isdir(path) else remove(path)
             self.docs[doc["id"]] = doc
             self._save()
 
@@ -380,7 +380,7 @@ class Store:
                 return
             for name in ("doc.pdf", "text.json"):
                 try:
-                    os.remove(os.path.join(self.dir(doc_id), name))
+                    remove(os.path.join(self.dir(doc_id), name))
                 except OSError:
                     pass
             self._texts.pop(doc_id, None)
@@ -397,7 +397,7 @@ class Store:
                 return False
             self._set_text(doc_id, pages)
             if pdf:
-                os.replace(pdf, self.pdf_file(doc_id))
+                replace(pdf, self.pdf_file(doc_id))
             if not d.get("named"):
                 d["name"] = first_words(next((p for p in pages if p.strip()), "")) or d.get("name")
             d.update(ocr=DONE, readBy=read_by)
@@ -410,7 +410,7 @@ class Store:
             if d is None or d.get("rev", 0) != rev:
                 return
             if pdf:
-                os.replace(pdf, self.pdf_file(doc_id))
+                replace(pdf, self.pdf_file(doc_id))
             self._set_text(doc_id, [""] * len(d.get("pages", [])))
             d.update(ocr=FAILED, readBy="")
             self._save()
@@ -422,7 +422,7 @@ class Store:
             self._set_text(doc["id"], text)
             if drop_pdf:
                 try:
-                    os.remove(self.pdf_file(doc["id"]))
+                    remove(self.pdf_file(doc["id"]))
                 except OSError:
                     pass
                 shutil.rmtree(os.path.join(self.dir(doc["id"]), "render"), ignore_errors=True)
@@ -441,7 +441,7 @@ class Store:
                 f["onServer"] = False
             self.gone_folders = []
             try:
-                os.remove(os.path.join(self.root, "sync.json"))
+                remove(os.path.join(self.root, "sync.json"))
             except OSError:
                 pass
             self._save()
@@ -553,7 +553,7 @@ class WebDav:
                 done += len(chunk)
                 if progress and total:
                     progress(done * 100 // total)
-        os.replace(out + ".part", out)
+        replace(out + ".part", out)
         return True
 
     def move(self, src, dst):
@@ -637,7 +637,7 @@ def _write_state(store, state):
     path = os.path.join(store.root, "sync.json")
     with open(path + ".tmp", "w", encoding="utf-8") as f:
         json.dump(state, f, indent=1, ensure_ascii=False)
-    os.replace(path + ".tmp", path)
+    replace(path + ".tmp", path)
 
 
 def sync_run(store, cfg, ensure_pdf, timeout=60):

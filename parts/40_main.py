@@ -9,7 +9,7 @@ def pdf_page(pdf, index, cache_dir, dpi=130):
         except Exception:
             made = []
         if made:
-            os.replace(made[0], out)
+            replace(made[0], out)
     return QtGui.QImage(out) if os.path.exists(out) else None
 
 
@@ -702,7 +702,7 @@ class Main(QtWidgets.QMainWindow):
         for f in os.listdir(folder):
             p = os.path.join(folder, f)
             if time.time() - os.path.getmtime(p) > 86400:
-                os.remove(p)
+                remove(p)
         out = os.path.join(folder, file_name_of(d))
         shutil.copyfile(pdf, out)
         return out
@@ -749,7 +749,7 @@ class Main(QtWidgets.QMainWindow):
                 out = os.path.join(folder, f"{base}.jpg" if n == 1 else f"{base} - {i + 1}.jpg")
                 if d.get("remote"):
                     made = pdf_pictures(pdf, os.path.join(self.store.dir(d["id"]), "render"), f"copy{i + 1}", 200, i + 1, i + 1, quality=90)
-                    made and shutil.move(made[0], out)
+                    made and move(made[0], out)
                 else:
                     src = self.store.page_file(d["id"], d["pages"][i]["id"])
                     if os.path.exists(src):
@@ -894,6 +894,7 @@ class Main(QtWidgets.QMainWindow):
                 self.naps2_page()
                 return
         self.scanning = True
+        self.trouble = ""
         self.scan_button.setText(_("cancel"))
         self.scan_button.setObjectName("scanning")
         self.scan_button.setStyle(self.scan_button.style())
@@ -983,7 +984,7 @@ class Main(QtWidgets.QMainWindow):
         os.makedirs(self.session_dir, exist_ok=True)
         with open(self.session_file() + ".tmp", "w", encoding="utf-8") as f:
             json.dump(self.session, f)
-        os.replace(self.session_file() + ".tmp", self.session_file())
+        replace(self.session_file() + ".tmp", self.session_file())
 
     def restore_session(self):
         """Pages scanned and not filed when the app was closed are still there."""
@@ -1012,7 +1013,7 @@ class Main(QtWidgets.QMainWindow):
         for f in list(files) + list(blank):
             pid = new_id()[:8]
             dst = os.path.join(self.session_dir, pid + ".jpg")
-            shutil.move(f, dst)
+            move(f, dst)
             page = {"id": pid, "src": dst, "rotation": (turn or {}).get(f, 0), "look": look}
             (self.session["blank"] if f in blank else self.session["pages"]).append(page)
         self.save_session()
@@ -1089,7 +1090,7 @@ class Main(QtWidgets.QMainWindow):
         pages = []
         for p in s["pages"]:
             pid = new_id()[:8]
-            shutil.move(p["src"], self.store.src_file(doc_id, pid))
+            move(p["src"], self.store.src_file(doc_id, pid))
             pages.append({"id": pid, "rotation": p.get("rotation", 0), "look": p.get("look", "original")})
         now = now_ms()
         if old:
@@ -1262,7 +1263,9 @@ class Main(QtWidgets.QMainWindow):
             scanner = re.sub(r"\s+\([^()]*\)$", "", device)
         else:
             scanner = _("no scanner found yet")
-        if self.syncing:
+        if getattr(self, "trouble", ""):
+            sync = self.trouble
+        elif self.syncing:
             sync = _("syncing…")
         elif not self.configured():
             sync = _("on this computer only")
@@ -1418,7 +1421,28 @@ def self_test(report):
     os._exit(1 if bad else 0)
 
 
+def unexpected(kind, error, trace):
+    """An error nobody caught: written down, said in the status line — and the app goes on.
+    (Left alone, PyQt ends the whole program on the spot, scan in hand.)"""
+    import traceback
+    words = "".join(traceback.format_exception(kind, error, trace))
+    sys.stderr.write(words)
+    try:
+        os.makedirs(DATA_DIR, exist_ok=True)
+        with open(os.path.join(DATA_DIR, "errors.log"), "a", encoding="utf-8") as f:
+            f.write(f"--- {datetime.now():%Y-%m-%d %H:%M:%S} · {VERSION} · {sys.platform}\n{words}\n")
+    except OSError:
+        pass
+    for w in QtWidgets.QApplication.topLevelWidgets() if QtWidgets.QApplication.instance() else ():
+        if isinstance(w, Main):
+            w.trouble = _("something went wrong — see errors.log")
+            w.status.setToolTip(os.path.join(DATA_DIR, "errors.log"))
+            QtCore.QTimer.singleShot(0, w.update_status)
+
+
 def main():
+    sys.excepthook = unexpected
+    threading.excepthook = lambda a: unexpected(a.exc_type, a.exc_value, a.exc_traceback)
     if "--self-test" in sys.argv:
         at = sys.argv.index("--self-test")
         self_test(sys.argv[at + 1] if len(sys.argv) > at + 1 else "-")

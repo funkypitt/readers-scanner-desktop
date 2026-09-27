@@ -366,6 +366,17 @@ if WSGIDAV:
     rs.sync_run(phone, cfg, lambda d: phone.pdf_file(d["id"]), 20)
     check("renamed here: the phone has the new name", phone.get(pid)["name"] == "Mietvertrag" and phone.get(pid)["named"], f"{phone_name} → {phone.get(pid)['name']}")
 
+# ---- 8c. an error nobody caught ------------------------------------------------------------
+before = sys.excepthook
+sys.excepthook = rs.unexpected
+QtCore.QTimer.singleShot(0, lambda: 1 / 0)
+settle(300)
+sys.excepthook = before
+log_file = os.path.join(rs.DATA_DIR, "errors.log")
+check("an error nobody caught: written down, said, and the app goes on", os.path.exists(log_file) and "ZeroDivisionError" in open(log_file, encoding="utf-8").read()
+      and w.status.text().startswith(_("something went wrong")[:12]) and w.isVisible(), w.status.text())
+w.trouble = ""; w.update_status()
+
 # ---- 9. leaving ------------------------------------------------------------------------------
 scanner(feeder=["facture-1.jpg", "facture-2.jpg"])
 click(w.scan_button)

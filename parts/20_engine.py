@@ -106,7 +106,7 @@ def render_page(src, out, rotation, look):
         return
     img = apply_look(open_upright(src, rotation), look)
     img.save(out + ".tmp", "JPEG", quality=80 if look == "bw" else JPEG_QUALITY, dpi=(DPI, DPI))
-    os.replace(out + ".tmp", out)
+    replace(out + ".tmp", out)
 
 
 # Tesseract's glyphless font (tessdata/pdf.ttf, Apache 2.0): every character an empty glyph half
@@ -225,7 +225,7 @@ def write_pdf(pages, out, title="", layers=None):
         for o in offsets:
             f.write(f"{o:010d} 00000 n \n".encode())
         f.write(f"trailer\n<< /Size {len(objs) + 1} /Root {catalog} 0 R /Info {info} 0 R >>\nstartxref\n{xref}\n%%EOF\n".encode())
-    os.replace(out + ".tmp", out)
+    replace(out + ".tmp", out)
     return out
 
 
@@ -273,7 +273,7 @@ def pdf_pictures(pdf, out_dir, stem, dpi, first=1, last=None, quality=88):
         raise RuntimeError(_("poppler-utils is needed to read a PDF"))
     for f in os.listdir(out_dir):
         if f.startswith(stem + "-"):
-            os.remove(os.path.join(out_dir, f))
+            remove(os.path.join(out_dir, f))
     cmd = [exe, "-r", str(dpi), "-jpeg", "-jpegopt", f"quality={quality}", "-f", str(max(1, first))] + (["-l", str(last)] if last else [])
     subprocess.run(cmd + [pdf, os.path.join(out_dir, stem)], capture_output=True, timeout=600, **quiet())
     return sorted(os.path.join(out_dir, f) for f in os.listdir(out_dir) if f.startswith(stem + "-") and f.endswith(".jpg"))
@@ -352,7 +352,7 @@ class Reader:
 
     def remove_best(self, lang):
         try:
-            os.remove(os.path.join(self.dir, lang + ".traineddata"))
+            remove(os.path.join(self.dir, lang + ".traineddata"))
         except OSError:
             pass
 
@@ -367,7 +367,7 @@ class Reader:
                 done += len(chunk)
                 if lang:
                     self.downloading[lang] = min(99, done * 100 // total)
-        os.replace(out + ".part", out)
+        replace(out + ".part", out)
 
     def download(self, lang):
         """The best model of a language, into the app's folder. True when it is there."""
@@ -425,7 +425,7 @@ class Reader:
             raise ReadError(str(e))
         finally:
             try:
-                os.remove(listing)
+                remove(listing)
             except OSError:
                 pass
         if proc.returncode != 0 or not os.path.exists(work + ".tsv"):
@@ -433,7 +433,7 @@ class Reader:
         try:
             with open(work + ".txt", encoding="utf-8", errors="replace") as f:
                 text = f.read().split("\f")
-            os.remove(work + ".txt")
+            remove(work + ".txt")
         except OSError:
             text = []
         text = [t.strip() for t in text[:len(pages)]]
@@ -455,7 +455,7 @@ class Reader:
                         lines[key] = []
                         layers[page].append(lines[key])
                     lines[key].append((c[11].strip(), left, top, left + width, top + height))
-        os.remove(work + ".tsv")
+        remove(work + ".tsv")
         return text, layers, read_by
 
 
@@ -555,7 +555,7 @@ class ReadQueue:
             for c in copies:
                 if c not in pages:
                     try:
-                        os.remove(c)
+                        remove(c)
                     except OSError:
                         pass
 
@@ -770,7 +770,7 @@ class Naps2:
         """One scan from one source. Returns (page files, error code or None, NAPS2's words)."""
         os.makedirs(out_dir, exist_ok=True)
         for f in os.listdir(out_dir):
-            os.remove(os.path.join(out_dir, f))
+            remove(os.path.join(out_dir, f))
         deskew = source != "glass"       # a feeder pulls sheets askew; on the glass, leave the page as laid
         out = os.path.join(out_dir, "p$(nnnn).jpg")
         if device.get("id") and not self.flatpak:

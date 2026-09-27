@@ -49,6 +49,31 @@ def _app_dirs():
             os.path.join(os.environ.get("XDG_DATA_HOME", os.path.expanduser("~/.local/share")), APP))
 
 
+def _steady(act, *args):
+    """Windows refuses to move, replace or delete a file that anything still has open — a
+    thumbnail being drawn, an antivirus looking at a new file. It is a matter of a moment: asked
+    again for a few seconds before it is an error. Elsewhere an open file moves like any other."""
+    for attempt in range(40 if sys.platform == "win32" else 1):
+        try:
+            return act(*args)
+        except PermissionError:
+            if attempt == (39 if sys.platform == "win32" else 0):
+                raise
+            time.sleep(0.1)
+
+
+def move(src, dst):
+    return _steady(shutil.move, src, dst)
+
+
+def replace(src, dst):
+    return _steady(os.replace, src, dst)
+
+
+def remove(path):
+    return _steady(os.remove, path)
+
+
 def quiet():
     """For every program started: on Windows, without this, a console window flashes each time."""
     return {"creationflags": 0x08000000} if sys.platform == "win32" else {}
@@ -246,6 +271,7 @@ _T = {
  "synced %1": ("synchronisé %1", "synchronisiert %1", "sincronizado %1", "sincronizado %1", "синхр. %1"),
  "no scanner found yet": ("pas encore de scanner", "noch kein scanner gefunden", "aún sin escáner", "ainda sem digitalizador", "сканер пока не найден"),
  "the scanner is getting ready…": ("le scanner se prépare…", "der scanner macht sich bereit…", "el escáner se prepara…", "o digitalizador prepara-se…", "сканер готовится…"),
+ "something went wrong — see errors.log": ("une erreur est survenue — voir errors.log", "etwas ging schief — siehe errors.log", "algo salió mal — ver errors.log", "algo correu mal — ver errors.log", "что-то пошло не так — см. errors.log"),
  "syncing…": ("synchronisation…", "synchronisiert…", "sincronizando…", "a sincronizar…", "синхронизация…"),
  "on this computer only": ("sur cet ordinateur seulement", "nur auf diesem computer", "solo en este ordenador", "só neste computador", "только на этом компьютере"),
  "Ctrl+, to set up a WebDAV folder shared with the phone": ("Ctrl+, pour configurer un dossier WebDAV partagé avec le téléphone", "Strg+, um einen mit dem telefon geteilten WebDAV-ordner einzurichten", "Ctrl+, para configurar una carpeta WebDAV compartida con el teléfono", "Ctrl+, para configurar uma pasta WebDAV partilhada com o telemóvel", "Ctrl+, — настроить папку WebDAV, общую с телефоном"),
@@ -416,7 +442,7 @@ class Store:
         tmp = self.index_file + ".tmp"
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump({"docs": list(self.docs.values()), "folders": self.folders, "goneFolders": self.gone_folders}, f, indent=1, ensure_ascii=False)
-        os.replace(tmp, self.index_file)
+        replace(tmp, self.index_file)
         if self.on_change:
             self.on_change()
 
@@ -454,7 +480,7 @@ class Store:
         path = os.path.join(self.dir(doc_id), "text.json")
         with open(path + ".tmp", "w", encoding="utf-8") as f:
             json.dump(pages, f, ensure_ascii=False)
-        os.replace(path + ".tmp", path)
+        replace(path + ".tmp", path)
         self._texts[doc_id] = list(pages)
 
     # ---- reading ----------------------------------------------------------------------
@@ -600,7 +626,7 @@ class Store:
                 # new pages: the old text and PDF no longer match them
                 for name in ("doc.pdf", "text.json"):
                     try:
-                        os.remove(os.path.join(self.dir(doc["id"]), name))
+                        remove(os.path.join(self.dir(doc["id"]), name))
                     except OSError:
                         pass
                 self._texts.pop(doc["id"], None)
@@ -611,7 +637,7 @@ class Store:
             for name in os.listdir(self.dir(doc["id"])):
                 if name not in keep and not name.startswith("ocr-"):
                     path = os.path.join(self.dir(doc["id"]), name)
-                    shutil.rmtree(path, ignore_errors=True) if os.path.isdir(path) else os.remove(path)
+                    shutil.rmtree(path, ignore_errors=True) if os.path.isdir(path) else remove(path)
             self.docs[doc["id"]] = doc
             self._save()
 
@@ -645,7 +671,7 @@ class Store:
                 return
             for name in ("doc.pdf", "text.json"):
                 try:
-                    os.remove(os.path.join(self.dir(doc_id), name))
+                    remove(os.path.join(self.dir(doc_id), name))
                 except OSError:
                     pass
             self._texts.pop(doc_id, None)
@@ -662,7 +688,7 @@ class Store:
                 return False
             self._set_text(doc_id, pages)
             if pdf:
-                os.replace(pdf, self.pdf_file(doc_id))
+                replace(pdf, self.pdf_file(doc_id))
             if not d.get("named"):
                 d["name"] = first_words(next((p for p in pages if p.strip()), "")) or d.get("name")
             d.update(ocr=DONE, readBy=read_by)
@@ -675,7 +701,7 @@ class Store:
             if d is None or d.get("rev", 0) != rev:
                 return
             if pdf:
-                os.replace(pdf, self.pdf_file(doc_id))
+                replace(pdf, self.pdf_file(doc_id))
             self._set_text(doc_id, [""] * len(d.get("pages", [])))
             d.update(ocr=FAILED, readBy="")
             self._save()
@@ -687,7 +713,7 @@ class Store:
             self._set_text(doc["id"], text)
             if drop_pdf:
                 try:
-                    os.remove(self.pdf_file(doc["id"]))
+                    remove(self.pdf_file(doc["id"]))
                 except OSError:
                     pass
                 shutil.rmtree(os.path.join(self.dir(doc["id"]), "render"), ignore_errors=True)
@@ -706,7 +732,7 @@ class Store:
                 f["onServer"] = False
             self.gone_folders = []
             try:
-                os.remove(os.path.join(self.root, "sync.json"))
+                remove(os.path.join(self.root, "sync.json"))
             except OSError:
                 pass
             self._save()
@@ -818,7 +844,7 @@ class WebDav:
                 done += len(chunk)
                 if progress and total:
                     progress(done * 100 // total)
-        os.replace(out + ".part", out)
+        replace(out + ".part", out)
         return True
 
     def move(self, src, dst):
@@ -902,7 +928,7 @@ def _write_state(store, state):
     path = os.path.join(store.root, "sync.json")
     with open(path + ".tmp", "w", encoding="utf-8") as f:
         json.dump(state, f, indent=1, ensure_ascii=False)
-    os.replace(path + ".tmp", path)
+    replace(path + ".tmp", path)
 
 
 def sync_run(store, cfg, ensure_pdf, timeout=60):
@@ -1735,7 +1761,7 @@ def render_page(src, out, rotation, look):
         return
     img = apply_look(open_upright(src, rotation), look)
     img.save(out + ".tmp", "JPEG", quality=80 if look == "bw" else JPEG_QUALITY, dpi=(DPI, DPI))
-    os.replace(out + ".tmp", out)
+    replace(out + ".tmp", out)
 
 
 # Tesseract's glyphless font (tessdata/pdf.ttf, Apache 2.0): every character an empty glyph half
@@ -1854,7 +1880,7 @@ def write_pdf(pages, out, title="", layers=None):
         for o in offsets:
             f.write(f"{o:010d} 00000 n \n".encode())
         f.write(f"trailer\n<< /Size {len(objs) + 1} /Root {catalog} 0 R /Info {info} 0 R >>\nstartxref\n{xref}\n%%EOF\n".encode())
-    os.replace(out + ".tmp", out)
+    replace(out + ".tmp", out)
     return out
 
 
@@ -1902,7 +1928,7 @@ def pdf_pictures(pdf, out_dir, stem, dpi, first=1, last=None, quality=88):
         raise RuntimeError(_("poppler-utils is needed to read a PDF"))
     for f in os.listdir(out_dir):
         if f.startswith(stem + "-"):
-            os.remove(os.path.join(out_dir, f))
+            remove(os.path.join(out_dir, f))
     cmd = [exe, "-r", str(dpi), "-jpeg", "-jpegopt", f"quality={quality}", "-f", str(max(1, first))] + (["-l", str(last)] if last else [])
     subprocess.run(cmd + [pdf, os.path.join(out_dir, stem)], capture_output=True, timeout=600, **quiet())
     return sorted(os.path.join(out_dir, f) for f in os.listdir(out_dir) if f.startswith(stem + "-") and f.endswith(".jpg"))
@@ -1981,7 +2007,7 @@ class Reader:
 
     def remove_best(self, lang):
         try:
-            os.remove(os.path.join(self.dir, lang + ".traineddata"))
+            remove(os.path.join(self.dir, lang + ".traineddata"))
         except OSError:
             pass
 
@@ -1996,7 +2022,7 @@ class Reader:
                 done += len(chunk)
                 if lang:
                     self.downloading[lang] = min(99, done * 100 // total)
-        os.replace(out + ".part", out)
+        replace(out + ".part", out)
 
     def download(self, lang):
         """The best model of a language, into the app's folder. True when it is there."""
@@ -2054,7 +2080,7 @@ class Reader:
             raise ReadError(str(e))
         finally:
             try:
-                os.remove(listing)
+                remove(listing)
             except OSError:
                 pass
         if proc.returncode != 0 or not os.path.exists(work + ".tsv"):
@@ -2062,7 +2088,7 @@ class Reader:
         try:
             with open(work + ".txt", encoding="utf-8", errors="replace") as f:
                 text = f.read().split("\f")
-            os.remove(work + ".txt")
+            remove(work + ".txt")
         except OSError:
             text = []
         text = [t.strip() for t in text[:len(pages)]]
@@ -2084,7 +2110,7 @@ class Reader:
                         lines[key] = []
                         layers[page].append(lines[key])
                     lines[key].append((c[11].strip(), left, top, left + width, top + height))
-        os.remove(work + ".tsv")
+        remove(work + ".tsv")
         return text, layers, read_by
 
 
@@ -2184,7 +2210,7 @@ class ReadQueue:
             for c in copies:
                 if c not in pages:
                     try:
-                        os.remove(c)
+                        remove(c)
                     except OSError:
                         pass
 
@@ -2399,7 +2425,7 @@ class Naps2:
         """One scan from one source. Returns (page files, error code or None, NAPS2's words)."""
         os.makedirs(out_dir, exist_ok=True)
         for f in os.listdir(out_dir):
-            os.remove(os.path.join(out_dir, f))
+            remove(os.path.join(out_dir, f))
         deskew = source != "glass"       # a feeder pulls sheets askew; on the glass, leave the page as laid
         out = os.path.join(out_dir, "p$(nnnn).jpg")
         if device.get("id") and not self.flatpak:
@@ -2543,7 +2569,7 @@ def save_config(cfg):
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(cfg, f, indent=2)
     os.chmod(tmp, 0o600)
-    os.replace(tmp, CONFIG_FILE)
+    replace(tmp, CONFIG_FILE)
 
 
 CREDENTIAL_KEYS = ("server", "folder", "username", "password")
@@ -2568,7 +2594,7 @@ def export_credentials(cfg, path):
     fd = os.open(path + ".tmp", os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
-    os.replace(path + ".tmp", path)
+    replace(path + ".tmp", path)
     return path
 
 
@@ -3384,7 +3410,7 @@ def pdf_page(pdf, index, cache_dir, dpi=130):
         except Exception:
             made = []
         if made:
-            os.replace(made[0], out)
+            replace(made[0], out)
     return QtGui.QImage(out) if os.path.exists(out) else None
 
 
@@ -4077,7 +4103,7 @@ class Main(QtWidgets.QMainWindow):
         for f in os.listdir(folder):
             p = os.path.join(folder, f)
             if time.time() - os.path.getmtime(p) > 86400:
-                os.remove(p)
+                remove(p)
         out = os.path.join(folder, file_name_of(d))
         shutil.copyfile(pdf, out)
         return out
@@ -4124,7 +4150,7 @@ class Main(QtWidgets.QMainWindow):
                 out = os.path.join(folder, f"{base}.jpg" if n == 1 else f"{base} - {i + 1}.jpg")
                 if d.get("remote"):
                     made = pdf_pictures(pdf, os.path.join(self.store.dir(d["id"]), "render"), f"copy{i + 1}", 200, i + 1, i + 1, quality=90)
-                    made and shutil.move(made[0], out)
+                    made and move(made[0], out)
                 else:
                     src = self.store.page_file(d["id"], d["pages"][i]["id"])
                     if os.path.exists(src):
@@ -4269,6 +4295,7 @@ class Main(QtWidgets.QMainWindow):
                 self.naps2_page()
                 return
         self.scanning = True
+        self.trouble = ""
         self.scan_button.setText(_("cancel"))
         self.scan_button.setObjectName("scanning")
         self.scan_button.setStyle(self.scan_button.style())
@@ -4358,7 +4385,7 @@ class Main(QtWidgets.QMainWindow):
         os.makedirs(self.session_dir, exist_ok=True)
         with open(self.session_file() + ".tmp", "w", encoding="utf-8") as f:
             json.dump(self.session, f)
-        os.replace(self.session_file() + ".tmp", self.session_file())
+        replace(self.session_file() + ".tmp", self.session_file())
 
     def restore_session(self):
         """Pages scanned and not filed when the app was closed are still there."""
@@ -4387,7 +4414,7 @@ class Main(QtWidgets.QMainWindow):
         for f in list(files) + list(blank):
             pid = new_id()[:8]
             dst = os.path.join(self.session_dir, pid + ".jpg")
-            shutil.move(f, dst)
+            move(f, dst)
             page = {"id": pid, "src": dst, "rotation": (turn or {}).get(f, 0), "look": look}
             (self.session["blank"] if f in blank else self.session["pages"]).append(page)
         self.save_session()
@@ -4464,7 +4491,7 @@ class Main(QtWidgets.QMainWindow):
         pages = []
         for p in s["pages"]:
             pid = new_id()[:8]
-            shutil.move(p["src"], self.store.src_file(doc_id, pid))
+            move(p["src"], self.store.src_file(doc_id, pid))
             pages.append({"id": pid, "rotation": p.get("rotation", 0), "look": p.get("look", "original")})
         now = now_ms()
         if old:
@@ -4637,7 +4664,9 @@ class Main(QtWidgets.QMainWindow):
             scanner = re.sub(r"\s+\([^()]*\)$", "", device)
         else:
             scanner = _("no scanner found yet")
-        if self.syncing:
+        if getattr(self, "trouble", ""):
+            sync = self.trouble
+        elif self.syncing:
             sync = _("syncing…")
         elif not self.configured():
             sync = _("on this computer only")
@@ -4793,7 +4822,28 @@ def self_test(report):
     os._exit(1 if bad else 0)
 
 
+def unexpected(kind, error, trace):
+    """An error nobody caught: written down, said in the status line — and the app goes on.
+    (Left alone, PyQt ends the whole program on the spot, scan in hand.)"""
+    import traceback
+    words = "".join(traceback.format_exception(kind, error, trace))
+    sys.stderr.write(words)
+    try:
+        os.makedirs(DATA_DIR, exist_ok=True)
+        with open(os.path.join(DATA_DIR, "errors.log"), "a", encoding="utf-8") as f:
+            f.write(f"--- {datetime.now():%Y-%m-%d %H:%M:%S} · {VERSION} · {sys.platform}\n{words}\n")
+    except OSError:
+        pass
+    for w in QtWidgets.QApplication.topLevelWidgets() if QtWidgets.QApplication.instance() else ():
+        if isinstance(w, Main):
+            w.trouble = _("something went wrong — see errors.log")
+            w.status.setToolTip(os.path.join(DATA_DIR, "errors.log"))
+            QtCore.QTimer.singleShot(0, w.update_status)
+
+
 def main():
+    sys.excepthook = unexpected
+    threading.excepthook = lambda a: unexpected(a.exc_type, a.exc_value, a.exc_traceback)
     if "--self-test" in sys.argv:
         at = sys.argv.index("--self-test")
         self_test(sys.argv[at + 1] if len(sys.argv) > at + 1 else "-")

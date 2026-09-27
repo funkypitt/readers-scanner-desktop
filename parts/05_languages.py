@@ -165,6 +165,7 @@ _T = {
  "synced %1": ("synchronisé %1", "synchronisiert %1", "sincronizado %1", "sincronizado %1", "синхр. %1"),
  "no scanner found yet": ("pas encore de scanner", "noch kein scanner gefunden", "aún sin escáner", "ainda sem digitalizador", "сканер пока не найден"),
  "the scanner is getting ready…": ("le scanner se prépare…", "der scanner macht sich bereit…", "el escáner se prepara…", "o digitalizador prepara-se…", "сканер готовится…"),
+ "something went wrong — see errors.log": ("une erreur est survenue — voir errors.log", "etwas ging schief — siehe errors.log", "algo salió mal — ver errors.log", "algo correu mal — ver errors.log", "что-то пошло не так — см. errors.log"),
  "syncing…": ("synchronisation…", "synchronisiert…", "sincronizando…", "a sincronizar…", "синхронизация…"),
  "on this computer only": ("sur cet ordinateur seulement", "nur auf diesem computer", "solo en este ordenador", "só neste computador", "только на этом компьютере"),
  "Ctrl+, to set up a WebDAV folder shared with the phone": ("Ctrl+, pour configurer un dossier WebDAV partagé avec le téléphone", "Strg+, um einen mit dem telefon geteilten WebDAV-ordner einzurichten", "Ctrl+, para configurar una carpeta WebDAV compartida con el teléfono", "Ctrl+, para configurar uma pasta WebDAV partilhada com o telemóvel", "Ctrl+, — настроить папку WebDAV, общую с телефоном"),
