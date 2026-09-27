@@ -4,6 +4,9 @@
 > It is not installed with the app: get it from naps2.com (`.deb`, `.rpm`, Flatpak, Windows,
 > macOS). Without it Reader's Scanner still files the pictures and PDFs you hand it, but cannot scan.
 
+> **State (2026-09-27): not released yet.** Tested against a stand-in for the scanner and against
+> the real NAPS2 without a scanner; not yet run on a real scanner. See [docs/NOTES.md](docs/NOTES.md).
+
 One window, one button. Put the sheets in the feeder or a page on the glass, press **scan**, press
 **Enter**: a searchable PDF, dated and named after its first words, filed in the folders you share
 with [Reader's Scanner](https://github.com/funkypitt/readers-scanner) on the phone. Black and white,
