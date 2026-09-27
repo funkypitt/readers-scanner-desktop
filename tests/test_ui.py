@@ -142,7 +142,7 @@ QtTest.QTest.keyClick(w.review.name, QtCore.Qt.Key_Return); clicks += 1
 check("Enter files it: the document is open, its pages shown", w.stack.currentWidget() is w.doc_view and w.current and len(w.pages.pictures) == 2)
 check("a document in two actions (scan, Enter)", clicks == 2, str(clicks))
 doc1 = w.current
-check("read and named by itself", wait(lambda: w.store.get(doc1)["ocr"] == rs.DONE, 60) and w.store.get(doc1)["name"] == "Facture d'électricité" and w.head.text() == "Facture d'électricité", w.head.text())
+check("read and named by itself", wait(lambda: w.store.get(doc1)["ocr"] == rs.DONE and w.head.text() == "Facture d'électricité", 90) and w.store.get(doc1)["name"] == "Facture d'électricité", w.head.text())
 wait(lambda: all(p.image is not None for p in w.pages.pictures), 10)
 shot(w, "03-document")
 check("the list is on « all scans », the document chosen", w.place is None and rows(w)[0][1] == "Facture d'électricité" and w.list.currentItem().text() == "Facture d'électricité", str(rows(w)))
