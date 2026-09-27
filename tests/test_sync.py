@@ -78,7 +78,8 @@ class Computer:
 
 
 def there():
-    return sorted(os.path.relpath(p, SCANS) for p in glob.glob(SCANS + "/**", recursive=True) if os.path.isfile(p) and "/.readers-scanner/" not in p)
+    found = (os.path.relpath(p, SCANS).replace("\\", "/") for p in glob.glob(SCANS + "/**", recursive=True) if os.path.isfile(p))
+    return sorted(f for f in found if not f.startswith(".readers-scanner/"))
 
 
 def described():

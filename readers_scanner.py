@@ -2352,8 +2352,12 @@ class Naps2:
                 pass
         for driver in self.drivers if self.cmd and not found and not asked else ():
             try:
-                out = subprocess.run(self.cmd + ["--listdevices", "--driver", driver], capture_output=True, timeout=90, env=self._env(), **quiet())
-                for line in said(out.stdout).splitlines():
+                try:                   # the second driver is a last resort: it is not waited for a whole minute
+                    listed = subprocess.run(self.cmd + ["--listdevices", "--driver", driver], capture_output=True, env=self._env(),
+                                            timeout=90 if driver == self.driver else 25, **quiet()).stdout
+                except subprocess.TimeoutExpired as late:
+                    listed = late.stdout or b""
+                for line in said(listed).splitlines():
                     line = line.strip()
                     if not line or error_of(line) or any(w in line for w in ("not available", "could not", "error")):
                         continue
