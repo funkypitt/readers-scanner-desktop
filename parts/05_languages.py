@@ -177,10 +177,7 @@ def _lang():
         v = os.environ.get(var)
         if v:
             return v[:2].lower()
-    try:
-        return (locale.getlocale()[0] or "en")[:2].lower()
-    except (ValueError, TypeError):
-        return "en"
+    return system_locale()[:2].lower()
 
 
 _LANG = _lang()

@@ -244,6 +244,41 @@ def reading_copy(page, look, out):
     return out
 
 
+_pdfium_lock = threading.Lock()      # pdfium does one thing at a time
+
+
+def pdf_pictures(pdf, out_dir, stem, dpi, first=1, last=None, quality=88):
+    """The pages of a PDF as JPEG files in `out_dir`, in order (`first`…`last`, counted from 1).
+    With pypdfium2 when it is installed (the Windows and macOS builds carry it), otherwise with
+    poppler's pdftoppm."""
+    os.makedirs(out_dir, exist_ok=True)
+    try:
+        import pypdfium2
+    except ImportError:
+        pypdfium2 = None
+    if pypdfium2 is not None:
+        files = []
+        with _pdfium_lock:
+            doc = pypdfium2.PdfDocument(pdf)
+            try:
+                for i in range(max(1, first) - 1, min(last or len(doc), len(doc))):
+                    out = os.path.join(out_dir, f"{stem}-{i + 1:04d}.jpg")
+                    doc[i].render(scale=dpi / 72.0).to_pil().convert("RGB").save(out, "JPEG", quality=quality, dpi=(dpi, dpi))
+                    files.append(out)
+            finally:
+                doc.close()
+        return files
+    exe = shutil.which("pdftoppm")
+    if not exe:
+        raise RuntimeError(_("poppler-utils is needed to read a PDF"))
+    for f in os.listdir(out_dir):
+        if f.startswith(stem + "-"):
+            os.remove(os.path.join(out_dir, f))
+    cmd = [exe, "-r", str(dpi), "-jpeg", "-jpegopt", f"quality={quality}", "-f", str(max(1, first))] + (["-l", str(last)] if last else [])
+    subprocess.run(cmd + [pdf, os.path.join(out_dir, stem)], capture_output=True, timeout=600, **quiet())
+    return sorted(os.path.join(out_dir, f) for f in os.listdir(out_dir) if f.startswith(stem + "-") and f.endswith(".jpg"))
+
+
 def import_image(path, out):
     """Any picture as a page: upright (EXIF), JPEG."""
     from PIL import ImageOps
@@ -282,7 +317,18 @@ class Reader:
 
     @staticmethod
     def exe():
-        return shutil.which(os.environ.get("READERS_SCANNER_TESSERACT") or "tesseract")
+        """Tesseract: the one named by the environment, the one inside the app, the system's."""
+        named = os.environ.get("READERS_SCANNER_TESSERACT")
+        if named:
+            return shutil.which(named)
+        return bundled("tesseract", "tesseract.exe") or bundled("tesseract", "bin", "tesseract") or shutil.which("tesseract")
+
+    @staticmethod
+    def env():
+        """The one inside the app is told where its own models are (orientation, English)."""
+        if not os.environ.get("READERS_SCANNER_TESSERACT") and bundled("tesseract", "tessdata"):
+            return dict(os.environ, TESSDATA_PREFIX=bundled("tesseract", "tessdata"))
+        return dict(os.environ)
 
     def system(self):
         """(the system's tessdata folder, its languages)."""
@@ -290,7 +336,7 @@ class Reader:
             folder, langs = None, []
             if self.exe():
                 try:
-                    out = subprocess.run([self.exe(), "--list-langs"], capture_output=True, text=True, timeout=20)
+                    out = subprocess.run([self.exe(), "--list-langs"], capture_output=True, text=True, timeout=20, env=self.env(), **quiet())
                     lines = (out.stdout + out.stderr).splitlines()
                     m = re.search(r'"([^"]+)"', lines[0]) if lines else None
                     folder = m.group(1) if m else None
@@ -364,10 +410,10 @@ class Reader:
         if folder:
             cmd += ["--tessdata-dir", folder]
         cmd += ["-c", "tessedit_create_tsv=1", "-c", "tessedit_create_txt=1"]
-        env = dict(os.environ, OMP_THREAD_LIMIT=str(max(1, min(4, os.cpu_count() or 1))))
+        env = dict(self.env(), OMP_THREAD_LIMIT=str(max(1, min(4, os.cpu_count() or 1))))
         errors = []
         try:
-            proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True, errors="replace", env=env)
+            proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True, errors="replace", env=env, **quiet())
             for line in proc.stderr:
                 m = re.match(r"Page (\d+)", line)
                 if m and progress:
@@ -423,7 +469,8 @@ def upright_rotations(files, reader):
 
     def one(path):
         try:
-            out = subprocess.run([exe, path, "-", "--psm", "0", "-l", "osd", "--dpi", str(DPI)], capture_output=True, text=True, timeout=60)
+            out = subprocess.run([exe, path, "-", "--psm", "0", "-l", "osd", "--dpi", str(DPI)], capture_output=True, text=True, errors="replace", timeout=60,
+                                 env=reader.env(), **quiet())
             turn = re.search(r"Rotate: (\d+)", out.stdout)
             sure = re.search(r"Orientation confidence: ([\d.]+)", out.stdout)
             if turn and sure and float(sure.group(1)) >= 2.5 and int(turn.group(1)) in (90, 180, 270):
@@ -522,13 +569,44 @@ class ReadQueue:
 
 NAPS2_URL = "https://www.naps2.com/download"
 SOURCES = ("auto", "glass", "feeder", "duplex")
-_ERRORS = (   # what NAPS2 says (in English: the console is run with that language) → our word for it
+_ERRORS = (   # what NAPS2 says in English → our word for it; NAPS2_WORDS has the other languages
     ("No pages are in the feeder", "empty"), ("does not support using a feeder", "nofeeder"), ("does not support using duplex", "noduplex"),
     ("could not be found", "notfound"), ("scanner is offline", "offline"), ("scanner is busy", "busy"), ("cover is open", "cover"),
     ("paper jam", "jam"), ("warming up", "warming"), ("was interrupted", "comm"), ("SANE driver is not available", "nosane"),
     ("No device was specified", "notfound"), ("error occurred with the scanning driver", "driver"), ("unexpected error", "driver"),
     ("worker process crashed", "driver"),
 )
+
+
+def error_of(line):
+    """Our word for what NAPS2 said on this line, or None. English where we can ask for it
+    (Linux, macOS); on Windows NAPS2 speaks the system's language."""
+    low = re.sub(r"\s+", " ", line).strip().lower()
+    for needle, code in _ERRORS:
+        if needle.lower() in low:
+            return code
+    if len(low) > 12:
+        for sentence, code in NAPS2_WORDS.items():
+            if sentence in low or (len(low) > 20 and sentence.startswith(low.rstrip(".。"))):
+                return code
+    return None
+
+
+def error_in(raw):
+    """(our word, NAPS2's words) for a line as NAPS2 wrote it, in bytes: on Windows nobody says
+    which code page a program without a console writes in, so the likely ones are tried until
+    the sentence is one NAPS2 has."""
+    pages = ["utf-8"] + (["oem", "mbcs"] if sys.platform == "win32" else []) + ["cp850", "cp1252", "cp866", "cp1251", "cp852", "cp1250", "cp437",
+                                                                                 "cp932", "cp936", "cp949", "cp950", "cp1253", "cp1254", "cp1255", "cp1256", "cp874"]
+    for page in pages:
+        try:
+            line = raw.decode(page)
+        except (UnicodeDecodeError, LookupError):
+            continue
+        code = error_of(line)
+        if code:
+            return code, line.strip()
+    return None, ""
 
 
 def error_text(code, detail=""):
@@ -568,20 +646,25 @@ class Naps2:
         if env:
             return shlex.split(env)
         if sys.platform == "win32":
-            for base in (os.environ.get("ProgramFiles"), os.environ.get("ProgramFiles(x86)"), os.environ.get("LOCALAPPDATA")):
+            for base in (os.environ.get("ProgramFiles"), os.environ.get("ProgramW6432"), os.environ.get("ProgramFiles(x86)"),
+                         os.path.join(os.environ.get("LOCALAPPDATA") or "", "Programs"), os.environ.get("LOCALAPPDATA")):
                 p = os.path.join(base or "", "NAPS2", "NAPS2.Console.exe")
-                if os.path.exists(p):
+                if base and os.path.exists(p):
                     return [p]
-            return None
+            exe = shutil.which("NAPS2.Console.exe") or shutil.which("naps2.console")
+            return [exe] if exe else None
         if sys.platform == "darwin":
-            p = "/Applications/NAPS2.app/Contents/MacOS/NAPS2"
-            return [p, "console"] if os.path.exists(p) else None
+            for base in ("/Applications", os.path.expanduser("~/Applications")):
+                p = os.path.join(base, "NAPS2.app", "Contents", "MacOS", "NAPS2")
+                if os.path.exists(p):
+                    return [p, "console"]
+            return None
         exe = shutil.which("naps2")
         if exe:
             return [exe, "console"]
         if shutil.which("flatpak"):
             try:
-                if subprocess.run(["flatpak", "info", "com.naps2.Naps2"], capture_output=True, timeout=10).returncode == 0:
+                if subprocess.run(["flatpak", "info", "com.naps2.Naps2"], capture_output=True, timeout=10, **quiet()).returncode == 0:
                     return ["flatpak", "run", "--command=naps2", "com.naps2.Naps2", "console"]
             except (OSError, subprocess.SubprocessError):
                 pass
@@ -592,8 +675,16 @@ class Naps2:
         return bool(self.cmd) and self.cmd[0] == "flatpak"
 
     @property
+    def drivers(self):
+        """NAPS2's drivers for this desktop, the usual one first."""
+        named = os.environ.get("READERS_SCANNER_DRIVER")
+        if named:
+            return tuple(named.split(","))
+        return ("wia", "twain") if sys.platform == "win32" else ("apple", "escl") if sys.platform == "darwin" else ("sane",)
+
+    @property
     def driver(self):
-        return "wia" if sys.platform == "win32" else "apple" if sys.platform == "darwin" else "sane"
+        return self.drivers[0]
 
     def _env(self):
         env = dict(os.environ, LC_ALL="en_US.UTF-8", LANG="en_US.UTF-8", LANGUAGE="en")
@@ -604,8 +695,8 @@ class Naps2:
 
     def _version(self):
         try:
-            out = subprocess.run(self.cmd + ["--help"], capture_output=True, text=True, timeout=30, env=self._env())
-            m = re.search(r"(\d+\.\d+(?:\.\d+)?)", (out.stdout + out.stderr).splitlines()[0])
+            out = subprocess.run(self.cmd + ["--help"], capture_output=True, timeout=60, env=self._env(), **quiet())
+            m = re.search(r"(\d+\.\d+(?:\.\d+)?)", said(out.stdout + out.stderr).strip().splitlines()[0])
             return m.group(1) if m else "?"
         except (OSError, subprocess.SubprocessError, IndexError):
             return None
@@ -616,7 +707,7 @@ class Naps2:
         scanimage = os.environ.get("READERS_SCANNER_SCANIMAGE") or shutil.which("scanimage")
         if self.driver == "sane" and scanimage and not self.flatpak:
             try:
-                out = subprocess.run(shlex.split(scanimage) + ["-f", "%d\t%v\t%m\t%t%n"], capture_output=True, text=True, timeout=60)
+                out = subprocess.run(shlex.split(scanimage) + ["-f", "%d\t%v\t%m\t%t%n"], capture_output=True, text=True, errors="replace", timeout=60, **quiet())
                 asked = out.returncode == 0        # SANE answered: NAPS2, which asks SANE too, would find no more
                 for line in out.stdout.splitlines():
                     parts = line.split("\t")
@@ -630,19 +721,21 @@ class Naps2:
                         found.append({"id": parts[0], "name": name, "backend": backend, "key": _model_key(parts[2])})
             except (OSError, subprocess.SubprocessError):
                 pass
-        if not found and not asked and self.cmd:
+        for driver in self.drivers if self.cmd and not found and not asked else ():
             try:
-                out = subprocess.run(self.cmd + ["--listdevices", "--driver", self.driver], capture_output=True, text=True, timeout=90, env=self._env())
-                for line in out.stdout.splitlines():
+                out = subprocess.run(self.cmd + ["--listdevices", "--driver", driver], capture_output=True, timeout=90, env=self._env(), **quiet())
+                for line in said(out.stdout).splitlines():
                     line = line.strip()
-                    if not line or any(w in line for w in ("not available", "could not", "error")):
+                    if not line or error_of(line) or any(w in line for w in ("not available", "could not", "error")):
                         continue
                     m = re.match(r"^(.*\S)\s+\(([^()]+)\)$", line)
                     inner = m.group(2) if m else ""
-                    found.append({"id": inner if inner.startswith("escl:") else None, "name": line, "backend": inner.split(":")[0] or self.driver,
-                                  "key": _model_key(m.group(1) if m else line)})
+                    found.append({"id": inner if inner.startswith("escl:") else None, "name": line, "driver": driver,
+                                  "backend": (inner.split(":")[0] if driver == "sane" else "") or driver, "key": _model_key(m.group(1) if m else line)})
             except (OSError, subprocess.SubprocessError):
                 pass
+            if found:
+                break                  # the usual driver sees it: the others are not asked
         rank = {b: i for i, b in enumerate(_BACKEND_ORDER)}
         return sorted(found, key=lambda d: rank.get(d["backend"], len(rank)))
 
@@ -654,7 +747,7 @@ class Naps2:
   <ScanProfile>
     <Version>2</Version>
     <Device><ID>{x(device["id"])}</ID><Name>{x(device["name"])}</Name></Device>
-    <DriverName>{self.driver}</DriverName>
+    <DriverName>{device.get("driver") or self.driver}</DriverName>
     <DisplayName>readers-scanner</DisplayName>
     <IsDefault>true</IsDefault>
     <BitDepth>C24Bit</BitDepth>
@@ -680,21 +773,21 @@ class Naps2:
             self._profile(device, source, pagesize, deskew)
             cmd = self.cmd + ["-p", "readers-scanner"]
         else:
-            cmd = self.cmd + ["--noprofile", "--driver", self.driver, "--device", re.sub(r"\s+\([^()]*\)$", "", device["name"]),
+            shown = device["name"] if (device.get("driver") or self.driver) != "sane" else re.sub(r"\s+\([^()]*\)$", "", device["name"])
+            cmd = self.cmd + ["--noprofile", "--driver", device.get("driver") or self.driver, "--device", shown,
                               "--source", source, "--dpi", str(DPI), "--bitdepth", "color", "--pagesize", pagesize.lower()] + (["--deskew"] if deskew else [])
         cmd += ["-o", out, "--jpegquality", str(JPEG_QUALITY), "-f", "-v"]
-        code, said = None, ""
+        code, words = None, ""
         self._cancelled = False
         try:
-            self.proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, errors="replace", env=self._env())
-            for line in self.proc.stdout:
-                line = line.strip()
+            self.proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=self._env(), **quiet())
+            for raw in self.proc.stdout:
+                line = said(raw).strip()
                 m = re.match(r"Scanned page (\d+)", line)
                 if m and on_page:
                     on_page(int(m.group(1)))
-                for needle, c in _ERRORS:
-                    if needle.lower() in line.lower() and code is None:
-                        code, said = c, line
+                if code is None:
+                    code, words = error_in(raw)
             self.proc.wait()
         except OSError as e:
             return [], "driver", str(e)
@@ -706,15 +799,18 @@ class Naps2:
         files = sorted(os.path.join(out_dir, f) for f in os.listdir(out_dir) if f.lower().endswith(".jpg"))
         if files:
             return files, None, ""
-        return [], code or "unknown", said
+        return [], code or "unknown", words
 
     def cancel(self):
         p = self.proc
         if p is not None:
             self._cancelled = True
             try:
-                p.send_signal(signal.SIGINT)
-                threading.Timer(3, lambda: p.poll() is None and p.terminate()).start()
+                if sys.platform == "win32":
+                    p.terminate()      # no signal to send there; NAPS2's worker leaves with its parent
+                else:
+                    p.send_signal(signal.SIGINT)
+                    threading.Timer(3, lambda: p.poll() is None and p.terminate()).start()
             except OSError:
                 pass
 
@@ -722,7 +818,9 @@ class Naps2:
 def page_size_of(cfg):
     fmt = cfg.get("format", "auto")
     if fmt == "auto":
-        country = (locale.getlocale()[0] or os.environ.get("LANG", "") or "").split(".")[0][-2:].upper()
+        country = (os.environ.get("LC_ALL") or os.environ.get("LC_PAPER") or os.environ.get("LANG") or "").split(".")[0][-2:].upper()
+        if not country.isalpha() or len(country) != 2:
+            country = system_locale()[-2:].upper()
         return "Letter" if country in ("US", "CA", "MX", "PH", "CL", "CO") else "A4"
     return "Letter" if fmt == "letter" else "A4"
 

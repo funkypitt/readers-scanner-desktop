@@ -3,15 +3,16 @@
 stand-in for NAPS2), reading (the real Tesseract), the PDF. Run: python3 tests/test_engine.py"""
 import os, shutil, subprocess, sys, tempfile, time
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-TMP = tempfile.mkdtemp(prefix="rs-test-")
-os.environ.update(XDG_CONFIG_HOME=TMP + "/config", XDG_DATA_HOME=TMP + "/data", FAKE_SCANNER=TMP + "/scanner", LANG="en_US.UTF-8", LC_ALL="en_US.UTF-8",
-                  READERS_SCANNER_NAPS2=f"{sys.executable} {HERE}/fake_naps2.py", READERS_SCANNER_SCANIMAGE=f"{sys.executable} {HERE}/fake_scanimage.py")
+HERE = os.path.dirname(os.path.abspath(__file__)).replace("\\", "/")
+PY = sys.executable.replace("\\", "/")
+TMP = os.path.realpath(tempfile.mkdtemp(prefix="rs-test-")).replace("\\", "/")
+os.environ.update(READERS_SCANNER_HOME=TMP, READERS_SCANNER_DRIVER="sane", FAKE_SCANNER=TMP + "/scanner", LANG="en_US.UTF-8", LC_ALL="en_US.UTF-8",
+                  READERS_SCANNER_NAPS2=f"{PY} {HERE}/fake_naps2.py", READERS_SCANNER_SCANIMAGE=f"{PY} {HERE}/fake_scanimage.py")
 sys.path.insert(0, os.path.dirname(HERE))
 import readers_scanner as rs
 
 PAGES = TMP + "/pages"
-subprocess.run([sys.executable, HERE + "/make_pages.py", PAGES], check=True, capture_output=True)
+subprocess.run([PY, HERE + "/make_pages.py", PAGES], check=True)
 SC = os.environ["FAKE_SCANNER"]
 failed = []
 
@@ -136,7 +137,41 @@ check("cancel stops the scan", r["error"] == "cancelled", str(r))
 os.environ["READERS_SCANNER_NAPS2"] = "/nonexistent/naps2"
 missing = rs.Naps2(rs.DATA_DIR)
 check("NAPS2 absent: known, nothing crashes", missing.version is None and rs.scan_pages(missing, cfg, "auto", out)["error"] in ("driver", "unknown", "offline", "nonaps2"))
-os.environ["READERS_SCANNER_NAPS2"] = f"{sys.executable} {HERE}/fake_naps2.py"
+os.environ["READERS_SCANNER_NAPS2"] = f"{PY} {HERE}/fake_naps2.py"
+
+# --- as on Windows and macOS ---------------------------------------------------------------
+# no SANE there: NAPS2 lists the scanners by name, one driver after the other, and on Windows
+# it answers in the system's language, in the console's code page
+os.environ["READERS_SCANNER_DRIVER"] = "wia,twain"
+scanner(feeder=["facture-1.jpg", "facture-2.jpg"], devices="twain:0\tCanon\tDR-C225 TWAIN\tscanner\n")
+w = rs.Naps2(TMP + "/windows")
+devs = w.devices()
+check("no scanner on the usual driver: the next driver is asked", [(d["name"], d["driver"], d["id"]) for d in devs] == [("Canon DR-C225 TWAIN", "twain", None)]
+      and [l for l in log() if "--listdevices" in l] == ["--listdevices --driver wia", "--listdevices --driver twain"], f"{devs} {log()}")
+r = rs.scan_pages(w, {"format": "a"}, "auto", out)
+check("and the scan goes through that driver, the scanner called by its name", r["error"] is None and len(r["files"]) == 2
+      and any("--driver twain --device Canon DR-C225 TWAIN --source feeder" in l for l in log()), f"{r} {log()}")
+known = {"format": "a", "device": r.get("device")}
+for page, words in (("cp850", "as a French Windows console writes"), ("cp1252", "as a French Windows program writes"), ("utf-8", "in UTF-8")):
+    scanner(glass="contrat.jpg", devices="twain:0\tCanon\tDR-C225 TWAIN\tscanner\n")
+    open(SC + "/speaks", "w").write("fr " + page)
+    r = rs.scan_pages(w, known, "auto", out)
+    check(f"NAPS2 says in French that the feeder is empty ({words}): understood, the glass is taken", r["error"] is None and r["source"] == "glass", str(r))
+scanner(devices="twain:0\tCanon\tDR-C225 TWAIN\tscanner\n", flags=["offline"])
+open(SC + "/speaks", "w").write("fr cp850")
+r = rs.scan_pages(w, known, "feeder", out)
+check("« Le scanner sélectionné est éteint. » → the scanner is not answering", r["error"] == "offline" and rs.error_text(r["error"]).startswith("the scanner is not answering"), str(r))
+check("every language NAPS2 speaks is known", len(rs.NAPS2_WORDS) > 400 and rs.error_of("In der Zuführung sind keine Seiten.") == "empty" and rs.error_in("Не найден выбранный сканер.".encode("cp866"))[0] == "notfound"
+      and rs.error_of("Scanned page 3.") is None and rs.error_of("Exporting image 1 of 2...") is None, str(rs.error_in("Не найден выбранный сканер.".encode("cp866"))))
+os.environ["READERS_SCANNER_DRIVER"] = "sane"
+
+# --- a PDF's pages as pictures -----------------------------------------------------------------
+rs.write_pdf([PAGES + "/facture-1.jpg", PAGES + "/facture-2.jpg", PAGES + "/contrat.jpg"], TMP + "/three.pdf", "three")
+pics = rs.pdf_pictures(TMP + "/three.pdf", TMP + "/pics", "p", 150)
+check("the pages of a PDF as pictures, in order, at the size asked", len(pics) == 3 and all(Image.open(p).size[0] in (1240, 1241) and Image.open(p).size[1] in (1754, 1755) for p in pics)
+      and abs(float(np.asarray(Image.open(pics[2]).convert("L")).mean()) - float(np.asarray(Image.open(PAGES + "/contrat.jpg").convert("L")).mean())) < 2, str([Image.open(p).size for p in pics]))
+one = rs.pdf_pictures(TMP + "/three.pdf", TMP + "/pics", "q", 100, 2, 2)
+check("one page alone", len(one) == 1 and Image.open(one[0]).size[0] in range(824, 830), str(one))
 
 # --- reading -------------------------------------------------------------------------------
 reader = rs.Reader(rs.DATA_DIR)
@@ -228,11 +263,14 @@ hits = store.search("decompte")
 check("search: no accents needed, a snippet shown", len(hits) == 1 and hits[0][0]["id"] == a and "décompte" in (hits[0][1] or ""), str(hits)[:200])
 check("search in names", [d["id"] for d, s in store.search("zurich")] == [b])
 
+own = os.environ.get("READERS_SCANNER_TESSERACT")
 os.environ["READERS_SCANNER_TESSERACT"] = "/nonexistent/tesseract"
 f = file_doc(["contrat.jpg"])
 d, _t = wait(f)
 check("without Tesseract: the pages kept as a PDF, the reason said", d["ocr"] == rs.FAILED and store.has_pdf(f) and "Tesseract" in q.errors.get(f, ""), str(q.errors))
 del os.environ["READERS_SCANNER_TESSERACT"]
+if own:
+    os.environ["READERS_SCANNER_TESSERACT"] = own
 
 store2 = rs.Store(rs.DATA_DIR + "/scans")
 check("everything is on disk: a second start finds the same documents", {d["id"] for d in store2.all()} == {a, b, c, e, f} and store2.text(a) == store.text(a))

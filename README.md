@@ -39,9 +39,13 @@ More detail: [docs/NOTES.md](docs/NOTES.md).
 
 - Debian, Ubuntu, Pop!_OS: add the [apt repository](https://funkypitt.github.io/apt-repo/), then `sudo apt install readers-scanner`. Or take the `.deb` from the [latest release](https://github.com/funkypitt/readers-scanner-desktop/releases/latest): `sudo apt install ./readers-scanner_*_all.deb`. Tesseract and poppler come with it.
 - Arch, Manjaro: `git clone https://github.com/funkypitt/readers-scanner-desktop && cd readers-scanner-desktop/packaging && makepkg -si`.
-- Anywhere else: `python3 readers_scanner.py` with PyQt5, requests, Pillow and numpy installed, and `tesseract`, `pdftoppm` and `pdftotext` (poppler) on the path.
+- Windows: `readers-scanner_…_windows_x64_setup.exe` from the latest release. It installs for you alone, without administrator rights. NAPS2 for Windows: the installer from naps2.com.
+- macOS: the `.dmg` from the latest release, `apple-silicon` or `intel`; drag the app to Applications. NAPS2 for macOS: the `.pkg` from naps2.com.
+- Anywhere else: `python3 readers_scanner.py` with PyQt5, requests, Pillow and numpy installed, and `tesseract` and `pdftoppm` (poppler) on the path — or `pip install pypdfium2` in place of poppler.
 
-Windows and macOS builds do not exist yet.
+The Windows and macOS builds carry their own Tesseract; nothing else to install but NAPS2. They
+are not signed. Windows: *More info* › *Run anyway*. macOS: open the app once, then *System
+Settings* › *Privacy & Security* › *Open Anyway* (before macOS 15: right click on the app › *Open*).
 
 ## Build and test
 
@@ -51,6 +55,13 @@ The program is one file, `readers_scanner.py`, glued from `parts/` by `./build.s
     python3 tests/test_engine.py                           # names, looks, blank pages, reading, the PDF
     QT_QPA_PLATFORM=offscreen python3 tests/test_ui.py     # the window, driven like a user
     python3 tests/test_sync.py                             # two computers and a WebDAV server (needs wsgidav)
+    python3 tests/real_naps2.py                            # with the real NAPS2 installed, no scanner needed
+    python3 readers_scanner.py --self-test -               # what any build must be able to do
+
+The Windows installer, the two macOS disk images and the .deb are built by GitHub Actions at every
+`v*` tag, each on its own system, after the same tests and the built app's own self-test.
+`tools/bundle_tesseract.py` gathers the Tesseract they carry; `tools/naps2_messages.py` rewrites
+the table of what NAPS2 says in its 46 languages (on Windows it answers in the system's).
 
 The tests use a stand-in for NAPS2 (`tests/fake_naps2.py`) and pages drawn for the purpose; they
 need no scanner.

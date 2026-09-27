@@ -36,6 +36,9 @@ Image.MAX_IMAGE_PIXELS = 200_000_000      # an A3 page at 600 dpi is not an atta
 
 def _app_dirs():
     """The settings folder and the documents' folder, one place per desktop."""
+    elsewhere = os.environ.get("READERS_SCANNER_HOME")      # the tests' own place
+    if elsewhere:
+        return os.path.join(elsewhere, "config"), os.path.join(elsewhere, "data")
     if sys.platform == "win32":
         base = os.path.join(os.environ.get("APPDATA") or os.path.expanduser("~"), "Readers Scanner")
         return base, base
@@ -44,6 +47,34 @@ def _app_dirs():
         return base, base
     return (os.path.join(os.environ.get("XDG_CONFIG_HOME", os.path.expanduser("~/.config")), APP),
             os.path.join(os.environ.get("XDG_DATA_HOME", os.path.expanduser("~/.local/share")), APP))
+
+
+def quiet():
+    """For every program started: on Windows, without this, a console window flashes each time."""
+    return {"creationflags": 0x08000000} if sys.platform == "win32" else {}
+
+
+def bundled(*path):
+    """A file shipped inside the app (the Windows and macOS builds carry Tesseract); None elsewhere."""
+    base = getattr(sys, "_MEIPASS", None)
+    p = os.path.join(base, *path) if base else None
+    return p if p and os.path.exists(p) else None
+
+
+def system_locale():
+    """"fr_CH": Qt knows it on every desktop; the environment often does not (Windows, an app
+    opened from the Finder)."""
+    return QtCore.QLocale.system().name() or "en_US"
+
+
+def said(raw):
+    """What a program wrote, whatever the code page it wrote it in (Windows consoles have their own)."""
+    for enc in ("utf-8", "oem" if sys.platform == "win32" else "latin-1", "latin-1"):
+        try:
+            return raw.decode(enc)
+        except (UnicodeDecodeError, LookupError):
+            pass
+    return raw.decode("utf-8", "replace")
 
 
 CONFIG_DIR, DATA_DIR = _app_dirs()

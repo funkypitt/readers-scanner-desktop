@@ -36,6 +36,9 @@ Image.MAX_IMAGE_PIXELS = 200_000_000      # an A3 page at 600 dpi is not an atta
 
 def _app_dirs():
     """The settings folder and the documents' folder, one place per desktop."""
+    elsewhere = os.environ.get("READERS_SCANNER_HOME")      # the tests' own place
+    if elsewhere:
+        return os.path.join(elsewhere, "config"), os.path.join(elsewhere, "data")
     if sys.platform == "win32":
         base = os.path.join(os.environ.get("APPDATA") or os.path.expanduser("~"), "Readers Scanner")
         return base, base
@@ -44,6 +47,34 @@ def _app_dirs():
         return base, base
     return (os.path.join(os.environ.get("XDG_CONFIG_HOME", os.path.expanduser("~/.config")), APP),
             os.path.join(os.environ.get("XDG_DATA_HOME", os.path.expanduser("~/.local/share")), APP))
+
+
+def quiet():
+    """For every program started: on Windows, without this, a console window flashes each time."""
+    return {"creationflags": 0x08000000} if sys.platform == "win32" else {}
+
+
+def bundled(*path):
+    """A file shipped inside the app (the Windows and macOS builds carry Tesseract); None elsewhere."""
+    base = getattr(sys, "_MEIPASS", None)
+    p = os.path.join(base, *path) if base else None
+    return p if p and os.path.exists(p) else None
+
+
+def system_locale():
+    """"fr_CH": Qt knows it on every desktop; the environment often does not (Windows, an app
+    opened from the Finder)."""
+    return QtCore.QLocale.system().name() or "en_US"
+
+
+def said(raw):
+    """What a program wrote, whatever the code page it wrote it in (Windows consoles have their own)."""
+    for enc in ("utf-8", "oem" if sys.platform == "win32" else "latin-1", "latin-1"):
+        try:
+            return raw.decode(enc)
+        except (UnicodeDecodeError, LookupError):
+            pass
+    return raw.decode("utf-8", "replace")
 
 
 CONFIG_DIR, DATA_DIR = _app_dirs()
@@ -227,10 +258,7 @@ def _lang():
         v = os.environ.get(var)
         if v:
             return v[:2].lower()
-    try:
-        return (locale.getlocale()[0] or "en")[:2].lower()
-    except (ValueError, TypeError):
-        return "en"
+    return system_locale()[:2].lower()
 
 
 _LANG = _lang()
@@ -1078,6 +1106,526 @@ def fetch_pdf(store, cfg, doc, progress=None):
     out = store.pdf_file(doc["id"])
     ok = dav.download(folder_url(cfg) + "/".join(encode_segment(p) for p in path.split("/")), out, progress)
     return out if ok else None
+# Written by tools/naps2_messages.py from NAPS2 v8.2.1 (46 languages): do not edit by hand.
+# What NAPS2 says when a scan fails (lower case, no final stop) → our word for it.
+NAPS2_WORDS = {
+    'a apărut o eroare la driver-ul de scanare': 'driver',
+    'a comunicação com o digitalizador foi interrompida': 'comm',
+    'a comunicação com scanner foi interrompida': 'comm',
+    'a fost întreruptă comunicarea cu dispozitivul de scanare': 'comm',
+    'a kiválasztott lapolvasó foglalt': 'busy',
+    'a kiválasztott lapolvasó inaktív': 'offline',
+    'a kiválasztott lapolvasó nem található': 'notfound',
+    'a kiválasztott lapolvasó nem támogatja a kétoldalas használatot. ha a lapolvasó feltehetőleg támogatja a kétoldalas használatot, próbáljon meg másik illesztőprogramot használni': 'noduplex',
+    'a kiválasztott lapolvasó nem támogatja az lapadagoló használatát. ha a lapolvasója rendelkezik lapadagolóval, próbáljon meg másik illesztőprogramot használni': 'nofeeder',
+    'a kommunikáció a lapolvasó eszközzel megszakadt': 'comm',
+    'a lapolvasó fedele nyitva van': 'cover',
+    'a lapolvasó felmelegedik': 'warming',
+    'a lapolvasóban papírelakadás van': 'jam',
+    'a munkavégző folyamat összeomlott': 'driver',
+    'a sane illesztőprogram nem áll rendelkezésre. győződjön meg róla, hogy telepítette a szükséges csomagokat:': 'nosane',
+    'a tampa do digitalizador está aberta': 'cover',
+    'a tampa do scanner está aberta': 'cover',
+    'an error occurred with the scanning driver': 'driver',
+    'aparentemente, o digitalizador escolhido não permite digitalização em frente e verso. se é suposto que o digitalizador o permita, tente usar um controlador diferente': 'noduplex',
+    'aparentemente, o digitalizador escolhido não possui um alimentador. se o seu digitalizador possuir um alimentador, tente usar um controlador diferente': 'nofeeder',
+    'arbeidsprosessen krasja': 'driver',
+    'arbejdsprocessen fejlede': 'driver',
+    'arbetsprocessen kraschade': 'driver',
+    'aucun périphérique sélectionné': 'notfound',
+    'besleyicide sayfa yok': 'empty',
+    'capacul scanerului este deschis': 'cover',
+    'carta inceppata nello scanner': 'jam',
+    'communicatie met het scanapparaat is onderbroken': 'comm',
+    'communication with the scanning device was interrupted': 'comm',
+    'có lỗi xảy ra với trình điều khiển máy quét': 'driver',
+    'daar was n fout met die skandeer drywer': 'driver',
+    'de geselecteerde scanner is bezig': 'busy',
+    'de geselecteerde scanner is offline': 'offline',
+    'de geselecteerde scanner ondersteunt geen dubbelzijdig scannen. als uw scanner dit hoort te ondersteunen, probeer dan een andere driver': 'noduplex',
+    'de sane driver is niet beschikbaar. installeer de vereiste pakketten:': 'nosane',
+    'de scanner warmt op': 'warming',
+    'delovni proces se je zrušil': 'driver',
+    'den valda skannern kan inte hittas': 'notfound',
+    'den valda skannern stöder inte användning av duplex. försök med en annan drivrutin, om din skanner sägs stödja duplex': 'noduplex',
+    'den valda skannern stöder inte användning av matare. försök med en annan drivrutin, om din skanner har en matare': 'nofeeder',
+    'den valda skannern är offline': 'offline',
+    'den valda skannern är upptagen': 'busy',
+    'den valde skannaren er fråkopla': 'offline',
+    'den valde skannaren er opptatt': 'busy',
+    'den valde skannaren støtter ikkje bruk av matar. hvis skannaren din har ein matar, prøv å bruka ein annan drivar': 'nofeeder',
+    'den valde skannaren støtter ikkje tosidig. hvis skannaren din skal støtta tosidig, prøv å bruka ein annan driver': 'noduplex',
+    'den valde skannaren vart ikkje funnen': 'notfound',
+    'den valgte scanner blev ikke fundet': 'notfound',
+    'den valgte scanner er offline': 'offline',
+    'den valgte scanner er optaget': 'busy',
+    'den valgte scanner understøtter ikke at bruge en dokumentføder. hvis din scanner har en dokumentføder, skal du prøve at bruge en anden driver': 'nofeeder',
+    'den valgte scanner understøtter ikke brugen af duplex. hvis din scanner burde understøtte duplex, kan du prøve at bruge en anden driver': 'noduplex',
+    'der arbeitsprozess ist abgestürzt': 'driver',
+    'der ausgewählte scanner unterstützt keine zuführung. wenn der scanner eine zuführung besitzt, probiere einen anderen treiber': 'nofeeder',
+    'der ausgewählte scanner unterstützt keinen duplexscan. sollte der scanner einen duplexscan unterstützen, probieren sie einen anderen treiber aus': 'noduplex',
+    'der er ingen ark i mataren': 'empty',
+    'der er ingen billeder i føderen': 'empty',
+    'der gewählte scanner ist ausgeschaltet (offline)': 'offline',
+    'der gewählte scanner ist in benutzung': 'busy',
+    'der gewählte scanner kann nicht gefunden werden': 'notfound',
+    'der opstod en fejl med scanner driveren': 'driver',
+    'der sane-treiber ist nicht verfügbar. stelle sicher, dass die erforderlichen pakete installiert sind:': 'nosane',
+    'der scanner hat einen papierstau': 'jam',
+    'der scanner wird vorgewärmt': 'warming',
+    'det finns inga sidor i mataren': 'empty',
+    'det oppstod en feil med skannerdriveren': 'driver',
+    'deze scanner ondersteunt geen automatische documentinvoer. als uw scanner dit wel heeft, probeer dan een andere driver': 'nofeeder',
+    'die kommunikation mit dem scan-gerät wurde unterbrochen': 'comm',
+    'die scannerabdeckung ist offen': 'cover',
+    'došlo je do greške sa driver-om za skener': 'driver',
+    'došlo k chybě ovladače skeneru': 'driver',
+    'drejtuesi sane nuk është i disponueshëm. sigurohuni të instaloni paketat e duhura:': 'nosane',
+    'driverul sane nu este disponibil. asigurați-vă că instalați pachetele necesare:': 'nosane',
+    'ein fehler ist mit dem scanner-treiber aufgetreten': 'driver',
+    'el controlador sane no está disponible. asegúrese de instalar los paquetes necesarios:': 'nosane',
+    'el escáner se está calentando': 'warming',
+    'el escáner seleccionado está inactivo': 'offline',
+    'el escáner seleccionado está ocupado': 'busy',
+    'el escáner seleccionado no admite el uso de un alimentador. si el escáner tiene un alimentador, intente usar un controlador diferente': 'nofeeder',
+    'el escáner seleccionado no admite el uso dúplex. si el escáner si admite dúplex, intente utilizar un controlador diferente': 'noduplex',
+    'el escáner tiene un papel atascado': 'jam',
+    'er is papier vastgelopen in de scanner': 'jam',
+    'ett fel uppstod med skannerdrivrutinen': 'driver',
+    'existe papel encravado no digitalizador': 'jam',
+    'fout met het stuurprogramma van de scanner': 'driver',
+    'galat ditemukan didalam driver piranti': 'driver',
+    'geen apparaat geselecteerd': 'notfound',
+    'geen bladsye is in die voerder': 'empty',
+    "geen pagina's in de invoerlade": 'empty',
+    'geen toestel gekies': 'notfound',
+    'greška se pojavila kod drivera za skeniranje': 'driver',
+    'het deksel van de scanner is open': 'cover',
+    'het werkproces is gecrasht': 'driver',
+    'hiba történt a lapolvasó illesztőprogrammal': 'driver',
+    'hiçbir aygıt seçilmedi': 'notfound',
+    'il coperchio dello scanner è aperto': 'cover',
+    'il driver sane non è disponibile. assicurati di aver installato il pacchetto richiesto:': 'nosane',
+    "il n'y a aucune page dans le dispositif d'alimentation": 'empty',
+    'il processo di elaborazione si è bloccato': 'driver',
+    'in der zuführung sind keine seiten': 'empty',
+    'ingen enheder valgt': 'notfound',
+    'ingen enhet er valgt': 'notfound',
+    'ingen enhet vald': 'notfound',
+    'ingen skannar vald': 'notfound',
+    'izabrani skener je isključen': 'offline',
+    'izabrani skener je zauzet': 'busy',
+    'izabrani skener nema podršku za korištenje dupleksa - dvostranog skeniranja. ako skener treba da podržava dupleks, pokušajte s korištenjem drugog drajvera': 'noduplex',
+    'izabrani skener nema podršku za korištenje ulagača papira. ako skener ima ulagač papira, pokušajte s korištenjem drugog drajvera': 'nofeeder',
+    'izabrani skener se ne može pronaći': 'notfound',
+    'izbran skener je izklopljen': 'offline',
+    'izbran skener je zaseden': 'busy',
+    'izbran skener ne podpira avtomatskega podajalnika. če skener vsebuje avtomatski podajalnik, poizkusite z drugim gonilnikom': 'nofeeder',
+    'izbran skener ne podpira obojestranskega skeniranja. če bi naj vaš skener podpiral obojestransko skeniranje, poizkusite z drugim gonilnikom': 'noduplex',
+    'izbranega skenerja ni bilo mogoče najti': 'notfound',
+    'izvēlētais skeneris ir aizņemts': 'busy',
+    'izvēlētais skeneris ir bezsaistē': 'offline',
+    'izvēlētais skeneris neatbalsta dokumentu padevi. ja jūsu skenerim ir padeve, mēģiniet izmantot citu draiveri': 'nofeeder',
+    'izvēlētais skeneris neatbalsta dupleksu. ja jūsu skenerim ir paredzēts duplekss, mēģiniet izmantot citu draiveri': 'noduplex',
+    'izvēlēto skeneri nevar atrast': 'notfound',
+    'kan de geselecteerde scanner niet vinden': 'notfound',
+    'keine geräte ausgewählt': 'notfound',
+    'không có thiết bị được lựa chọn': 'notfound',
+    'không trang sau nằm trong máng': 'empty',
+    'kommunikasie met die skandeertoestel is onderbreek': 'comm',
+    'kommunikasjon med skannaren vart avbroten': 'comm',
+    'kommunikation med scanningsenheden blev afbrudt': 'comm',
+    'kommunikationen med skanningsenheten avbröts': 'comm',
+    'komunikace se skenovacím zařízením byla přerušena': 'comm',
+    'komunikacija s skenerjem je bila prekinjena': 'comm',
+    'komunikacja z urządzeniem skanującym została przerwana': 'comm',
+    'komunikasi dengan alat pindai terganggu': 'comm',
+    'komunikimi me pajisjen e skanimit u ndërpre': 'comm',
+    'komunikácia so skenovacím zariadením bola prerušená': 'comm',
+    'kryt skenera je otvorený': 'cover',
+    "l'escàner s'està escalfant": 'warming',
+    "l'escàner seleccionat està apagat": 'offline',
+    "l'escàner seleccionat està ocupat": 'busy',
+    "l'escàner seleccionat no suporta alimentació des d'un alimentador. si el vostre escàner té alimentador de paper, seleccioneu un controlador diferent": 'nofeeder',
+    "l'escàner seleccionat no suporta dúplex (escaneig per dues cares). si el vostre escàner suporta aquesta tecnologia, seleccioneu un controlador diferent": 'noduplex',
+    "l'escàner té un embús de paper": 'jam',
+    'la communication avec le périphérique de numérisation a été interrompue': 'comm',
+    'la comunicazione con il dispositivo di scansione è stata interrotta': 'comm',
+    "la tapa de l'escàner està oberta": 'cover',
+    'la tapa del escáner está abierta': 'cover',
+    'laitetta ei valittu': 'notfound',
+    'le capot du scanner est ouvert': 'cover',
+    "le pilote sane n'est pas disponible. merci d'installer les paquets nécessaires :": 'nosane',
+    'le processus de travail a planté': 'driver',
+    'le scanner a un bourrage papier': 'jam',
+    'le scanner est en train de préchauffer': 'warming',
+    'le scanner sélectionné est introuvable': 'notfound',
+    'le scanner sélectionné est occupé': 'busy',
+    'le scanner sélectionné est éteint': 'offline',
+    "le scanner sélectionné ne semble pas disposer de dispositif d'alimentation. s'il en possède un, essayer d'utiliser un autre pilote": 'nofeeder',
+    "le scanner sélectionné ne semble pas gérer pas le recto-verso (duplex). s'il est supposé le prendre en charge, essayer d'utiliser un autre pilote": 'noduplex',
+    "lo scanner selezionato non supporta l'uso di un alimentatore automatico. se lo scanner ha un alimentatore automatico, prova a usare un driver differente": 'nofeeder',
+    'lo scanner selezionato non supporta la scansione fronte retro. se lo scanner dovrebbe supportare la scansione fronte retro, prova a usare un driver differente': 'noduplex',
+    'lo scanner selezionato non è stato trovato': 'notfound',
+    'lo scanner selezionato è occupato': 'busy',
+    'lo scanner selezionato è offline': 'offline',
+    'lo scanner si sta riscaldando': 'warming',
+    'mbulesa e skanerit është e hapur': 'cover',
+    'máy quét chọn không hỗ trợ sử dụng hai mặt. nếu máy quét của bạn phải hỗ trợ hai mặt, hãy thử sử dụng một trình điều khiển khác nhau': 'noduplex',
+    'máy quét chọn không hỗ trợ sử dụng một feeder. nếu máy quét của bạn không có một feeder, hãy thử sử dụng một trình điều khiển khác nhau': 'nofeeder',
+    'máy quét chọn không thể được tìm thấy': 'notfound',
+    'máy quét chọn đang bận': 'busy',
+    'máy quét chọn đang ẩn': 'offline',
+    'máy quét có kẹt giấy': 'jam',
+    'máy quét đang ấm dần lên': 'warming',
+    'naprava ni izbrana': 'notfound',
+    'nav izvēlēta ierīce': 'notfound',
+    'ndodhi një gabim me drejtuesin e skanimit': 'driver',
+    'nebolo vybrané žiadne zariadenie': 'notfound',
+    'nebylo vybráno žádné zařízení': 'notfound',
+    'nema listova u uvlakaču': 'empty',
+    'nema papira u ulagaču': 'empty',
+    'nenhum dispositivo selecionado': 'notfound',
+    'nenhum scanner escolhido': 'notfound',
+    'nessun dispositivo selezionato': 'notfound',
+    'nici o foaie in alimentator': 'empty',
+    'nici un dispozitiv selectat': 'notfound',
+    'nie ma stron w podajniku': 'empty',
+    'nie można odnaleźć wybranego skanera': 'notfound',
+    'nie wybrano urządzenia': 'notfound',
+    'nije izabran uređaj': 'notfound',
+    'nincs kiválasztott eszköz': 'notfound',
+    'nincs lap a lapadagolóban': 'empty',
+    'no device selected': 'notfound',
+    'no ha seleccionado ningún dispositivo': 'notfound',
+    "no hi ha cap pàgina a l'alimentador": 'empty',
+    'no pages are in the feeder': 'empty',
+    "no s'ha pogut trobar l'escàner seleccionat": 'notfound',
+    "no s'ha seleccionat cap dispositiu": 'notfound',
+    "no s'ha trobat el controlador sane. assegureu-vos d'instal·lar les dependències necessàries:": 'nosane',
+    'no se ha encontrado el escáner seleccionado': 'notfound',
+    "non ci sono fogli nell'alimentatore automatico": 'empty',
+    'notika kļūda ar skenēšanas draiveri': 'driver',
+    'nuk ka faqe te furnizuesi': 'empty',
+    'nuk është zgjedhur asnjë pajisje': 'notfound',
+    'não existem folhas no alimentador': 'empty',
+    'nắp máy quét mở': 'cover',
+    'o controlador sane não está disponível. certifique-se que instala os pacotes necessários:': 'nosane',
+    'o digitalizador escolhido está desligado': 'offline',
+    'o digitalizador escolhido está ocupado': 'busy',
+    'o digitalizador escolhido não foi encontrado': 'notfound',
+    'o digitalizador está a aquecer': 'warming',
+    'o driver sane não está disponível. certifique-se de instalar os pacotes necessários:': 'nosane',
+    'o processo de trabalho falhou': 'driver',
+    'o processo de trabalho travou': 'driver',
+    'o scanner escolhido está ocupado': 'busy',
+    'o scanner escolhido está offline': 'offline',
+    'o scanner escolhido não foi encontrado': 'notfound',
+    'o scanner está aquecendo': 'warming',
+    'o scanner selecionado não suporta o uso de alimentador. se o scanner tiver um alimentador, tente usar um driver diferente': 'nofeeder',
+    'o scanner selecionado não suporta o uso duplex. se o scanner realmente suporta duplex, tente usar um driver diferente': 'noduplex',
+    'o scanner tem um atolamento de papel': 'jam',
+    'ocorreu algum erro com o driver do scanner': 'driver',
+    'ocorreu um erro com o controlador de digitalização': 'driver',
+    'ocurrió un error con el controlador del escáner': 'driver',
+    'odabrani skener ne podržava dvostrano skeniranje. ako vaš skener nema duplekser, pokušajte da instalirate drugi drajver': 'noduplex',
+    'odabrani skener ne podržava korišćenje uvlakača. ako vaš skener nema uvlakač, pokušajte da instalirate drugi drajver': 'nofeeder',
+    'odabrani skener nije pronađen': 'notfound',
+    'odabrani skener nije uključen': 'offline',
+    'ovladač sane není dostupný. ověřte instalaci požadovaných balíčků:': 'nosane',
+    'ovládač sane nie je k dispozícii. preverte požadované balíky pre inštaláciu:': 'nosane',
+    'padavimo mechanizme nėra lapų': 'empty',
+    'padevē nav lapu': 'empty',
+    'papir je zaglavio u skeneru': 'jam',
+    'papir v skenerju se je zagozdil': 'jam',
+    'pasirinktas skeneris nepalaiko dvipusio skenavimo. jei jūsų skeneris turi dvipusio skenavimo galimybę, pabandykite naudoti kitą tvarkyklę': 'noduplex',
+    'pasirinktas skeneris nepalaiko padavimo mechanizmo. jei jūsų skeneris tikrai turi padavimo mechanizmą, pabandykite naudoti kitą tvarkyklę': 'nofeeder',
+    'pasirinktas skeneris neprisijungęs': 'offline',
+    'pasirinktas skeneris nerastas': 'notfound',
+    'pogreška s upravljačkim programom za skener': 'driver',
+    'poklopac skenera je otvoren': 'cover',
+    'pokrov skenerja je odprt': 'cover',
+    'pokrywa skanera jest otwarta': 'cover',
+    'pracovní proces spadl': 'driver',
+    'pracovný proces spadol': 'driver',
+    'prekinuta je komunikacija sa uređajem za skeniranje': 'comm',
+    'pri gonilniku skenerja je prišlo do napake': 'driver',
+    'pri ovládači skenovania sa vyskytla chyba': 'driver',
+    'proces roboczy uległ awarii': 'driver',
+    'procesi i punës u ndërpre': 'driver',
+    'procesul worker s-a oprit neașteptat': 'driver',
+    'pārtrūka sakari ar skenēšanas ierīci': 'comm',
+    'radni proces je prekinut': 'driver',
+    "s'ha interromput la comunicació amb el dispositiu d'escaneig": 'comm',
+    "s'ha produït un error": 'driver',
+    "s'ha produït un error amb el controlador de l'escàner": 'driver',
+    'sane - ajuri ei ole käytettävissä. asenna tarvittava osat:': 'nosane',
+    'sane drajver nije dostupan. pobrinite se da instalirate potrebne pakete:': 'nosane',
+    'sane drivrutin är inte tillgänglig. kontroller och installera nödvändigt paket:': 'nosane',
+    'sane gonilnik ni na voljo. preverite namestitev potrebnega dodatka:': 'nosane',
+    'sane sürücüsü kullanılamıyor. gerekli paketlerin kuruluduğundan emin olun:': 'nosane',
+    'sane 驱动不可用。请确认已安装所需的软件包:': 'nosane',
+    'sane 드라이버를 사용할 수 없습니다. 다음 패키지가 설치 되어 있는지 확인해 주십시오:': 'nosane',
+    'sane-drivaren er ikkje tilgjengeleg. installer den nødvendige pakken:': 'nosane',
+    'sane-driveren er ikke tilgængelig. kontroller at du har installeret den påkrævede pakke:': 'nosane',
+    'saneドライバが利用不可能です。必要なパッケージをインストールしてください。:': 'nosane',
+    'scanerul are o foaie mototolită': 'jam',
+    'scanerul se inițializează': 'warming',
+    'scanerul selectat este deconectat': 'offline',
+    'scanerul selectat este ocupat': 'busy',
+    'scanerul selectat nu a fost găsit': 'notfound',
+    'scanerul selectat nu suportă alimentarea automată. dacă scanerul are totuși alimentare automată, atunci încercați alt driver': 'nofeeder',
+    'scanerul selectat nu suportă funcția duplex. dacă scanerul are totuși duplex, atunci încercați alt driver': 'noduplex',
+    'scanneren har papirstop': 'jam',
+    'scanneren varmer op': 'warming',
+    'scannerens cover er åbent': 'cover',
+    'se interrumpió la comunicación con el dispositivo de escaneo': 'comm',
+    'sem papel no alimentador': 'empty',
+    'seçilen tarayıcı bulunamadı': 'notfound',
+    'seçilen tarayıcı meşgul': 'busy',
+    'seçilen tarayıcı çevrim dışı': 'offline',
+    'seçilen tarayıcı, besleyici kullanmayı desteklemiyor. eğer tarayıcınızın bir besleyicisi varsa başka bir sürücü kullanmayı deneyin': 'nofeeder',
+    'seçilen tarayıcı, çift taraflı kullanımı desteklemiyor. eğer tarayıcınız çift taraflı kullanımı destekliyorsa başka bir sürücü kullanmayı deneyin': 'noduplex',
+    'si è verificato un errore con il driver di scansione': 'driver',
+    'sin hojas en el alimentador': 'empty',
+    'skaner się rozgrzewa': 'warming',
+    'skaneri i zgjedhur nuk e mbështet dupleksin. nëse skaneri supozohet se e pranon dupleksin, provoni të përdorni një drejtues tjetër': 'noduplex',
+    'skaneri i zgjedhur nuk e mbështet përdorimin e furnizuesit. nëse skaneri yt nuk ka një furnizues, provo të përdorësh një drejtues të ndryshëm': 'nofeeder',
+    'skaneri i zgjedhur nuk mund të gjendej': 'notfound',
+    'skaneri i zgjedhur është i zënë': 'busy',
+    'skaneri i zgjedhur është jashtë linje': 'offline',
+    'skaneri ka një bllokim letre': 'jam',
+    'skaneri po ngrohet': 'warming',
+    'skannardekselet er opent': 'cover',
+    'skannaren har papirstopp': 'jam',
+    'skannaren varmer opp': 'warming',
+    'skanner soojeneb': 'warming',
+    'skanneri draiveril ilmnes tõrge': 'driver',
+    'skanneri kaas on avatud': 'cover',
+    'skanneri lämpiää': 'warming',
+    'skanneril on paberiummistus': 'jam',
+    'skannerin kansi on auki': 'cover',
+    'skannerissa on paperitukos': 'jam',
+    'skannerlocket är öppet': 'cover',
+    'skannern har papperstrassel': 'jam',
+    'skannern värmer upp': 'warming',
+    'skener sa zahrieva': 'warming',
+    'skener se ogreva': 'warming',
+    'skener se rozehřívá': 'warming',
+    'skener se zagrijava': 'warming',
+    'skenera vāks ir atvērts': 'cover',
+    'skenerio tvarkyklės klaida': 'driver',
+    'skeneris uzsilst': 'warming',
+    'skenerī ir iesprūdis papīrs': 'jam',
+    'sterownik sane nie jest dostępny. upewnij się, że zainstalowałeś wymagane pakiety:': 'nosane',
+    'syöttölaite on tyjä': 'empty',
+    'sööturis ei ole ühtegi lehte': 'empty',
+    'tarayıcı sürücüsü ile ilgili bir hata oluştu': 'driver',
+    'tarayıcı ısınıyor': 'warming',
+    'tarayıcıda kağıt sıkışması var': 'jam',
+    'tarayıcının kapağı açık': 'cover',
+    'tarayıcıyla olan iletişim kesintiye uğradı': 'comm',
+    'the sane driver is not available. make sure to install the required packages:': 'nosane',
+    'the scanner has a paper jam': 'jam',
+    'the scanner is warming up': 'warming',
+    "the scanner's cover is open": 'cover',
+    'the selected scanner could not be found': 'notfound',
+    'the selected scanner does not support using a feeder. if your scanner does have a feeder, try using a different driver': 'nofeeder',
+    'the selected scanner does not support using duplex. if your scanner is supposed to support duplex, try using a different driver': 'noduplex',
+    'the selected scanner is busy': 'busy',
+    'the selected scanner is offline': 'offline',
+    'the worker process crashed': 'driver',
+    'työprosessi kaatui': 'driver',
+    'ukjend feil med skanne-drivaren': 'driver',
+    "une erreur est survenue avec le pilote d'acquisition": 'driver',
+    'uređaj nije odabran': 'notfound',
+    'v podajalniku ni listov': 'empty',
+    'v podavači nejsou žádné papíry': 'empty',
+    'v podávači nie sú žiadne listy': 'empty',
+    'v skeneri sa zasekol papier': 'jam',
+    'valittu skanneri ei tue monipuoleisuutta. jos skannerisi luultavasti tukee sitä, kokeile toista ajuria': 'noduplex',
+    'valittu skanneri ei tue syöttölaitetta. jos skannerissasi on syöttölaite, kokeile toista ajuria': 'nofeeder',
+    'valittu skanneri on offline-tilassa': 'offline',
+    'valittu skanneri on varattu': 'busy',
+    'valittua skanneria ei löydy': 'notfound',
+    'valitud skanner ei toeta dupleksi kasutamist. kui teie skanner peaks dupleksit toetama, proovige kasutada teist draiverit': 'noduplex',
+    'valitud skanner ei toeta sööturi kasutamist. kui teie skanneril on söötur, proovige kasutada teist draiverit': 'nofeeder',
+    'valitud skanner on hõivatud': 'busy',
+    'valitud skännerit ei leitud': 'notfound',
+    've skeneru je zmuchlaný papír': 'jam',
+    'virhe skannausajurissa': 'driver',
+    'vybraný skener je offline': 'offline',
+    'vybraný skener je vypnutý': 'offline',
+    'vybraný skener je zaneprázdnený': 'busy',
+    'vybraný skener je zaneprázdněn': 'busy',
+    'vybraný skener nebyl nalezen': 'notfound',
+    'vybraný skener nepodporuje použitie podávača. ak skener obsahuje podávač, skúste použiť iný ovládač': 'nofeeder',
+    'vybraný skener nepodporuje použití oboustranný mód. pokud by měl podporovat oboustranný mód, zkuste použít jiný ovladač': 'noduplex',
+    'vybraný skener nepodporuje použití podavače. pokud váš skener má podavač, zkuste použít jiný ovladač': 'nofeeder',
+    'vybraný skener neskenuje obojstranne. ak sa v parametroch skenera uvádza, že ho podporuje, potom treba nájsť iný ovládač': 'noduplex',
+    'vybraný skener sa nenašiel': 'notfound',
+    'víko skeneru je otevřené': 'cover',
+    'w skanerze zaciął się papier': 'jam',
+    'wybrany skaner jest w trybie offline': 'offline',
+    'wybrany skaner jest zajęty': 'busy',
+    'wybrany skaner nie obsługuje druku obustronnego. jeśli twój skaner powinien wspierać druk obustronny, spróbuj użyć innego sterownika': 'noduplex',
+    'wybrany skaner nie obsługuje podajnika. jeżeli twój skaner ma podajnik, spróbuj użyć innego sterownika': 'nofeeder',
+    'wystąpił błąd w sterowniku skanowania': 'driver',
+    'yhteys skannauslaitteen kanssa keskeytyi': 'comm',
+    'çalışma işlemi çöktü': 'driver',
+    'ükski seade pole valitud': 'notfound',
+    'įrenginys nepasirinktas': 'notfound',
+    'δεν επιλέχθηκε συσκευή': 'notfound',
+    'δεν υπάρχουν σελίδες στον τροφοδότη': 'empty',
+    'εμπλοκή χαρτιού στον σαρωτή': 'jam',
+    'ο επιλεγμένος σαρωτής βρίσκεται εκτός σύνδεσης (offline)': 'offline',
+    'ο επιλεγμένος σαρωτής δεν μπόρεσε να βρεθεί': 'notfound',
+    'ο επιλεγμένος σαρωτής δεν υποστηρίζει λειτουργία διπλής όψης. εάν ο σαρωτής πράγματι διαθέτει λειτουργία διπλής όψης, προτείνεται η χρήση διαφορετικού οδηγού': 'noduplex',
+    'ο επιλεγμένος σαρωτής δεν υποστηρίζει χρήση τροφοδότη. εάν ο σαρωτής πράγματι διαθέτει τροφοδότη, προτείνεται η χρήση διαφορετικού οδηγού': 'nofeeder',
+    'ο επιλεγμένος σαρωτής είναι απασχολημένος': 'busy',
+    'ο οδηγός sane δεν είναι διαθέσιμος. βεβαιωθείτε ότι έχετε εγκαταστήσει τα απαιτούμενα πακέτα:': 'nosane',
+    'προθέρμανση σαρωτή': 'warming',
+    'σφάλμα του οδηγού σάρωσης': 'driver',
+    'το κάλυμμα του σαρωτή είναι ανοικτό': 'cover',
+    'в податчике нет листов': 'empty',
+    'в сканере застряла бумага': 'jam',
+    'вибраний сканер вимкнено': 'offline',
+    'вибраний сканер зайнятий': 'busy',
+    'вибраний сканер не підтримує автоматичну подачу паперу. якщо ваш сканер все ж має автоматичну подачу паперу, спробуйте вибрати інший драйвер': 'nofeeder',
+    'вибраний сканер не підтримує двостороннє сканування. якщо ваш сканер все ж підтримує двостороннє сканування, спробуйте вибрати інший драйвер': 'noduplex',
+    'выбранный сканер занят': 'busy',
+    'выбранный сканер не поддерживает дуплекс. если ваш сканер поддерживает двустраничное сканирование, попробуйте использовать другой драйвер': 'noduplex',
+    'выбранный сканер не поддерживает использование автоподатчика. если ваш сканер имеет апд, попробуйте другой драйвер': 'nofeeder',
+    'выбранный сканер отключён': 'offline',
+    'відкрито кришку сканеру': 'cover',
+    'дошло је до грешке са дрajвером за скенер': 'driver',
+    'драйвер sane не доступний. перевірте, чи встановлено такі пакети:': 'nosane',
+    'драйвер sane недоступен. убедитесь, что необходимые пакеты установлены:': 'nosane',
+    'драйверът sane не е наличен. уверете се, че сте инсталирали необходимите пакети:': 'nosane',
+    'заглављен папир у скенеру': 'jam',
+    'заседнала хартия в скенера': 'jam',
+    'збій робочого процесу': 'driver',
+    'зминання паперу у сканері': 'jam',
+    'избраният скенер е недостъпен': 'offline',
+    'избраният скенер не е достъпен': 'notfound',
+    'избраният скенер не поддържа автоматично подаване на листове. ако вашият скенер има устройство за автоматично подаване на листове, опитайте различен драйвър': 'nofeeder',
+    'избраният скенер не поддържа двустранно сканиране. ако тази функция би трябвало да се поддържа, използвайте различен драйвер': 'noduplex',
+    'капакът на скенера не е затворен': 'cover',
+    'комуникацията със сканиращото устройство беше прекъсната': 'comm',
+    'крышка сканера открыта': 'cover',
+    'не вибрано пристрій': 'notfound',
+    'не выбран сканер': 'notfound',
+    'не е избрано устройство': 'notfound',
+    'не знайдено вибраний сканер': 'notfound',
+    'не найден выбранный сканер': 'notfound',
+    'нема листова у увлакачу': 'empty',
+    'няма листoве в устройството за подаване': 'empty',
+    'обмін інформацією зі сканером було перервано': 'comm',
+    'одабрани скенер не подржава двострано скенирање. ако ваш скенер нема дуплексер, покушајте да инсталирате други драјвер': 'noduplex',
+    'одабрани скенер не подржава коришћење увлакача. ако ваш скенер нема увлакач, покушајте да инсталирате други драјвер': 'nofeeder',
+    'одабрани скенер није пронађен': 'notfound',
+    'одабрани скенер није укључен': 'offline',
+    'ошибка драйвера сканирования': 'driver',
+    'подготовка на скенера': 'warming',
+    'поклопац скенера је отворен': 'cover',
+    'помилка драйвера сканування': 'driver',
+    'проблем с драйвъра на скенера': 'driver',
+    'прогрівання сканеру': 'warming',
+    'работният процес се срина': 'driver',
+    'рабочий процесс завершился сбоем': 'driver',
+    'разогрев сканера': 'warming',
+    'связь с устройством сканирования была прервана': 'comm',
+    'скенер се загрева': 'warming',
+    'у пристрої відсутній папір': 'empty',
+    'уређај није одабран': 'notfound',
+    'אין דפים במזין המסמכים': 'empty',
+    'אירעה שגיאה במנהל ההתקן של הסורק': 'driver',
+    'המכסה של הסורק פתוח': 'cover',
+    'הסורק הנבחר עסוק': 'busy',
+    'הסורק מתחמם': 'warming',
+    'הסורק שנבחר איננו מקוון': 'offline',
+    'הסורק שנבחר איננו תומך במזין מסמכים. אם לסורק יש מזין מסמכים, כדאי לנסות להשתמש במנהל התקן אחר': 'nofeeder',
+    'הסורק שנבחר לא נמצא': 'notfound',
+    'הסורק שנבחר לא תומך במצב דופלקס (סריקה דו־צדדית). אם הסורק שלך אמור לתמוך בדופלקס, כדאי לנסות להשתמש במנהל התקן אחר': 'noduplex',
+    'התקשורת מול מכשיר הסריקה נקטעה': 'comm',
+    'לא נבחר התקן': 'notfound',
+    'מנהל התקן ה־sane לא זמין. נא לוודא שהתקנת את החבילות הנדרשות:': 'nosane',
+    'נתקע דף בסורק': 'jam',
+    'תהליך הרקע קרס': 'driver',
+    'اسکنر انتخاب شده استفاده از اسکن دورو را پشتیبانی نمی\u200cکند. اگر اسکنر پشتیبانی از اسکن دورو را پیشنهاد می\u200cدهد، تلاش کنید از درایور دیگری استفاده کنید': 'noduplex',
+    'اسکنر انتخاب شده استفاده از خوراک\u200cدهنده را پشتیبانی نمی\u200cکند. اگر اسکنر شما خوراک\u200cدهنده دارد تلاش کنید از درایور دیگری استفاده کنید': 'nofeeder',
+    'اسکنر انتخاب شده یافت نشد': 'notfound',
+    'اسکنر انتخابی خاموش است': 'offline',
+    'اسکنر انتخابی مشغول است': 'busy',
+    'اسکنر در حال گرم شدن است': 'warming',
+    'الماسح الضوئي المحدد غير متصل': 'offline',
+    'الماسح الضوئي المحدد لا يدعم استخدام الوضع المزدوج. إذا كان ماسحك الضوئي من المفترض أن يدعم الوضع المزدوج، حاول استخدام تعريف مختلف': 'noduplex',
+    'الماسح الضوئي المحدد مشغول': 'busy',
+    'الماسح الضوئي لديه ورق منحشر': 'jam',
+    'الماسح الضوئي يقوم بالإحماء': 'warming',
+    'تعذر العثور على الماسح الضوئي المحدد': 'notfound',
+    'حدث خطأ مع تعريف المسح الضوئي': 'driver',
+    'خطای در ارتباط با درایور اسکن رخ داد': 'driver',
+    'درایور sane موجود نیست. مطمئن شوید بسته\u200cهای مورد نیاز را نصب کرده\u200cاید.:': 'nosane',
+    'درب اسکنر باز است': 'cover',
+    'غطاء الماسح الضوئي مفتوح': 'cover',
+    'لا توجد صفحات في المغذي': 'empty',
+    'لا يدعم الماسح الضوئي المحدد باستخدام علبة تغذية. إذا كان الماسح الضوئي الخاص يوجد به مغذي، حاول استخدام برنامج تشغيل مختلف': 'nofeeder',
+    'لم يتم تحديد أي جهاز': 'notfound',
+    'هیچ دستگاهی انتخاب نشده': 'notfound',
+    'کاغذ داخل اسکنر گیر کرده است': 'jam',
+    'کاغذی داخل خوراک\u200cدهنده نیست': 'empty',
+    'कोई उपकरण चयनित नहीं।': 'notfound',
+    'फीडर में कोई पेज नहीं है।': 'empty',
+    'स्कैनिंग डिवाइस के साथ संचार बाधित हो गया।': 'comm',
+    'स्कैनिंग ड्राइवर के साथ कोई त्रुटि उत्पन्न हुई': 'driver',
+    'පරිලෝකකයෙහි උපක්\u200dරම ධාවකයෙහි දෝෂයක් පැනනැගිනි': 'driver',
+    'スキャナドライバにエラーが発生しました': 'driver',
+    'スキャナーがウォームアップ中です': 'warming',
+    'スキャナーのカバーが開いています': 'cover',
+    'スキャナーの紙詰まりです': 'jam',
+    'デバイスが選択されていません': 'notfound',
+    'フィーダーが空です': 'empty',
+    '与扫描设备的通信中断': 'comm',
+    '両面スキャンがこのスキャナではできません。スキャナに両面機能が備わっている場合は、別のドライバを試してみてください': 'noduplex',
+    '尚未選擇裝置': 'notfound',
+    '尝试扫描文件发生错误': 'driver',
+    '工作进程崩溃': 'driver',
+    '所选的扫描仪不支持使用输稿器。如果您的扫描仪确实有输稿器，请尝试使用不同的驱动程序': 'nofeeder',
+    '所选的扫描仪不支持双面扫描。如果您的扫描仪支持双面扫描，请尝试使用不同的驱动程序': 'noduplex',
+    '所選掃瞄器不支援使用送紙器。如果您的掃瞄器沒有送紙器，請試著使用不同的驅動程式': 'nofeeder',
+    '所選的掃瞄器離線': 'offline',
+    '扫描仪原稿盖已打开': 'cover',
+    '扫描仪发生卡纸': 'jam',
+    '扫描仪正在预热': 'warming',
+    '找不到所選的掃瞄器': 'notfound',
+    '掃瞄時發生錯誤': 'driver',
+    '无法找到所选的扫描仪': 'notfound',
+    '未选择设备': 'notfound',
+    '沒有頁面在送紙器中': 'empty',
+    '输稿器中未发现纸张': 'empty',
+    '选定的扫描仪处于脱机状态': 'offline',
+    '选定的扫描仪正在工作': 'busy',
+    '選択されたスキャナはフィーダーを利用できません。もしスキャナにフィーダーがある場合は、別のドライバを試してみてください': 'nofeeder',
+    '選択されたスキャナは使用中です': 'busy',
+    '選択されたスキャナは接続されていません': 'offline',
+    '選択されたスキャナーが見つかりません': 'notfound',
+    '공급장치에 용지가 없습니다': 'empty',
+    '선택된 스캐너가 사용 중 입니다': 'busy',
+    '선택된 스캐너를 찾을 수 없습니다': 'notfound',
+    '선택된 스캐너에서는 양면 기능을 사용할 수 없습니다. 만약 스캐너가 양면 기능을 지원한다면, 다른 드라이버를 선택 해 주세요': 'noduplex',
+    '선택된 스캐너에서는 지급기를 사용할 수 없습니다. 만약 지급기가 있는 스캐너라면, 다른 드라이버를 선택 해 주세요': 'nofeeder',
+    '선택된 스캐너의 연결이 끊겼습니다': 'offline',
+    '선택된 장치가 없습니다': 'notfound',
+    '스캐너 예열 중': 'warming',
+    '스캐너 용지걸림': 'jam',
+    '스캐너 커버 열림': 'cover',
+    '스캔 장비와 연결이 끊어졌습니다': 'comm',
+    '스캔 중 오류가 발생했습니다': 'driver',
+    '작업 프로세스가 튕겼습니다': 'driver',
+}
+
+
 
 
 # ------------------------------------------------------------------------------------------
@@ -1324,6 +1872,41 @@ def reading_copy(page, look, out):
     return out
 
 
+_pdfium_lock = threading.Lock()      # pdfium does one thing at a time
+
+
+def pdf_pictures(pdf, out_dir, stem, dpi, first=1, last=None, quality=88):
+    """The pages of a PDF as JPEG files in `out_dir`, in order (`first`…`last`, counted from 1).
+    With pypdfium2 when it is installed (the Windows and macOS builds carry it), otherwise with
+    poppler's pdftoppm."""
+    os.makedirs(out_dir, exist_ok=True)
+    try:
+        import pypdfium2
+    except ImportError:
+        pypdfium2 = None
+    if pypdfium2 is not None:
+        files = []
+        with _pdfium_lock:
+            doc = pypdfium2.PdfDocument(pdf)
+            try:
+                for i in range(max(1, first) - 1, min(last or len(doc), len(doc))):
+                    out = os.path.join(out_dir, f"{stem}-{i + 1:04d}.jpg")
+                    doc[i].render(scale=dpi / 72.0).to_pil().convert("RGB").save(out, "JPEG", quality=quality, dpi=(dpi, dpi))
+                    files.append(out)
+            finally:
+                doc.close()
+        return files
+    exe = shutil.which("pdftoppm")
+    if not exe:
+        raise RuntimeError(_("poppler-utils is needed to read a PDF"))
+    for f in os.listdir(out_dir):
+        if f.startswith(stem + "-"):
+            os.remove(os.path.join(out_dir, f))
+    cmd = [exe, "-r", str(dpi), "-jpeg", "-jpegopt", f"quality={quality}", "-f", str(max(1, first))] + (["-l", str(last)] if last else [])
+    subprocess.run(cmd + [pdf, os.path.join(out_dir, stem)], capture_output=True, timeout=600, **quiet())
+    return sorted(os.path.join(out_dir, f) for f in os.listdir(out_dir) if f.startswith(stem + "-") and f.endswith(".jpg"))
+
+
 def import_image(path, out):
     """Any picture as a page: upright (EXIF), JPEG."""
     from PIL import ImageOps
@@ -1362,7 +1945,18 @@ class Reader:
 
     @staticmethod
     def exe():
-        return shutil.which(os.environ.get("READERS_SCANNER_TESSERACT") or "tesseract")
+        """Tesseract: the one named by the environment, the one inside the app, the system's."""
+        named = os.environ.get("READERS_SCANNER_TESSERACT")
+        if named:
+            return shutil.which(named)
+        return bundled("tesseract", "tesseract.exe") or bundled("tesseract", "bin", "tesseract") or shutil.which("tesseract")
+
+    @staticmethod
+    def env():
+        """The one inside the app is told where its own models are (orientation, English)."""
+        if not os.environ.get("READERS_SCANNER_TESSERACT") and bundled("tesseract", "tessdata"):
+            return dict(os.environ, TESSDATA_PREFIX=bundled("tesseract", "tessdata"))
+        return dict(os.environ)
 
     def system(self):
         """(the system's tessdata folder, its languages)."""
@@ -1370,7 +1964,7 @@ class Reader:
             folder, langs = None, []
             if self.exe():
                 try:
-                    out = subprocess.run([self.exe(), "--list-langs"], capture_output=True, text=True, timeout=20)
+                    out = subprocess.run([self.exe(), "--list-langs"], capture_output=True, text=True, timeout=20, env=self.env(), **quiet())
                     lines = (out.stdout + out.stderr).splitlines()
                     m = re.search(r'"([^"]+)"', lines[0]) if lines else None
                     folder = m.group(1) if m else None
@@ -1444,10 +2038,10 @@ class Reader:
         if folder:
             cmd += ["--tessdata-dir", folder]
         cmd += ["-c", "tessedit_create_tsv=1", "-c", "tessedit_create_txt=1"]
-        env = dict(os.environ, OMP_THREAD_LIMIT=str(max(1, min(4, os.cpu_count() or 1))))
+        env = dict(self.env(), OMP_THREAD_LIMIT=str(max(1, min(4, os.cpu_count() or 1))))
         errors = []
         try:
-            proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True, errors="replace", env=env)
+            proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True, errors="replace", env=env, **quiet())
             for line in proc.stderr:
                 m = re.match(r"Page (\d+)", line)
                 if m and progress:
@@ -1503,7 +2097,8 @@ def upright_rotations(files, reader):
 
     def one(path):
         try:
-            out = subprocess.run([exe, path, "-", "--psm", "0", "-l", "osd", "--dpi", str(DPI)], capture_output=True, text=True, timeout=60)
+            out = subprocess.run([exe, path, "-", "--psm", "0", "-l", "osd", "--dpi", str(DPI)], capture_output=True, text=True, errors="replace", timeout=60,
+                                 env=reader.env(), **quiet())
             turn = re.search(r"Rotate: (\d+)", out.stdout)
             sure = re.search(r"Orientation confidence: ([\d.]+)", out.stdout)
             if turn and sure and float(sure.group(1)) >= 2.5 and int(turn.group(1)) in (90, 180, 270):
@@ -1602,13 +2197,44 @@ class ReadQueue:
 
 NAPS2_URL = "https://www.naps2.com/download"
 SOURCES = ("auto", "glass", "feeder", "duplex")
-_ERRORS = (   # what NAPS2 says (in English: the console is run with that language) → our word for it
+_ERRORS = (   # what NAPS2 says in English → our word for it; NAPS2_WORDS has the other languages
     ("No pages are in the feeder", "empty"), ("does not support using a feeder", "nofeeder"), ("does not support using duplex", "noduplex"),
     ("could not be found", "notfound"), ("scanner is offline", "offline"), ("scanner is busy", "busy"), ("cover is open", "cover"),
     ("paper jam", "jam"), ("warming up", "warming"), ("was interrupted", "comm"), ("SANE driver is not available", "nosane"),
     ("No device was specified", "notfound"), ("error occurred with the scanning driver", "driver"), ("unexpected error", "driver"),
     ("worker process crashed", "driver"),
 )
+
+
+def error_of(line):
+    """Our word for what NAPS2 said on this line, or None. English where we can ask for it
+    (Linux, macOS); on Windows NAPS2 speaks the system's language."""
+    low = re.sub(r"\s+", " ", line).strip().lower()
+    for needle, code in _ERRORS:
+        if needle.lower() in low:
+            return code
+    if len(low) > 12:
+        for sentence, code in NAPS2_WORDS.items():
+            if sentence in low or (len(low) > 20 and sentence.startswith(low.rstrip(".。"))):
+                return code
+    return None
+
+
+def error_in(raw):
+    """(our word, NAPS2's words) for a line as NAPS2 wrote it, in bytes: on Windows nobody says
+    which code page a program without a console writes in, so the likely ones are tried until
+    the sentence is one NAPS2 has."""
+    pages = ["utf-8"] + (["oem", "mbcs"] if sys.platform == "win32" else []) + ["cp850", "cp1252", "cp866", "cp1251", "cp852", "cp1250", "cp437",
+                                                                                 "cp932", "cp936", "cp949", "cp950", "cp1253", "cp1254", "cp1255", "cp1256", "cp874"]
+    for page in pages:
+        try:
+            line = raw.decode(page)
+        except (UnicodeDecodeError, LookupError):
+            continue
+        code = error_of(line)
+        if code:
+            return code, line.strip()
+    return None, ""
 
 
 def error_text(code, detail=""):
@@ -1648,20 +2274,25 @@ class Naps2:
         if env:
             return shlex.split(env)
         if sys.platform == "win32":
-            for base in (os.environ.get("ProgramFiles"), os.environ.get("ProgramFiles(x86)"), os.environ.get("LOCALAPPDATA")):
+            for base in (os.environ.get("ProgramFiles"), os.environ.get("ProgramW6432"), os.environ.get("ProgramFiles(x86)"),
+                         os.path.join(os.environ.get("LOCALAPPDATA") or "", "Programs"), os.environ.get("LOCALAPPDATA")):
                 p = os.path.join(base or "", "NAPS2", "NAPS2.Console.exe")
-                if os.path.exists(p):
+                if base and os.path.exists(p):
                     return [p]
-            return None
+            exe = shutil.which("NAPS2.Console.exe") or shutil.which("naps2.console")
+            return [exe] if exe else None
         if sys.platform == "darwin":
-            p = "/Applications/NAPS2.app/Contents/MacOS/NAPS2"
-            return [p, "console"] if os.path.exists(p) else None
+            for base in ("/Applications", os.path.expanduser("~/Applications")):
+                p = os.path.join(base, "NAPS2.app", "Contents", "MacOS", "NAPS2")
+                if os.path.exists(p):
+                    return [p, "console"]
+            return None
         exe = shutil.which("naps2")
         if exe:
             return [exe, "console"]
         if shutil.which("flatpak"):
             try:
-                if subprocess.run(["flatpak", "info", "com.naps2.Naps2"], capture_output=True, timeout=10).returncode == 0:
+                if subprocess.run(["flatpak", "info", "com.naps2.Naps2"], capture_output=True, timeout=10, **quiet()).returncode == 0:
                     return ["flatpak", "run", "--command=naps2", "com.naps2.Naps2", "console"]
             except (OSError, subprocess.SubprocessError):
                 pass
@@ -1672,8 +2303,16 @@ class Naps2:
         return bool(self.cmd) and self.cmd[0] == "flatpak"
 
     @property
+    def drivers(self):
+        """NAPS2's drivers for this desktop, the usual one first."""
+        named = os.environ.get("READERS_SCANNER_DRIVER")
+        if named:
+            return tuple(named.split(","))
+        return ("wia", "twain") if sys.platform == "win32" else ("apple", "escl") if sys.platform == "darwin" else ("sane",)
+
+    @property
     def driver(self):
-        return "wia" if sys.platform == "win32" else "apple" if sys.platform == "darwin" else "sane"
+        return self.drivers[0]
 
     def _env(self):
         env = dict(os.environ, LC_ALL="en_US.UTF-8", LANG="en_US.UTF-8", LANGUAGE="en")
@@ -1684,8 +2323,8 @@ class Naps2:
 
     def _version(self):
         try:
-            out = subprocess.run(self.cmd + ["--help"], capture_output=True, text=True, timeout=30, env=self._env())
-            m = re.search(r"(\d+\.\d+(?:\.\d+)?)", (out.stdout + out.stderr).splitlines()[0])
+            out = subprocess.run(self.cmd + ["--help"], capture_output=True, timeout=60, env=self._env(), **quiet())
+            m = re.search(r"(\d+\.\d+(?:\.\d+)?)", said(out.stdout + out.stderr).strip().splitlines()[0])
             return m.group(1) if m else "?"
         except (OSError, subprocess.SubprocessError, IndexError):
             return None
@@ -1696,7 +2335,7 @@ class Naps2:
         scanimage = os.environ.get("READERS_SCANNER_SCANIMAGE") or shutil.which("scanimage")
         if self.driver == "sane" and scanimage and not self.flatpak:
             try:
-                out = subprocess.run(shlex.split(scanimage) + ["-f", "%d\t%v\t%m\t%t%n"], capture_output=True, text=True, timeout=60)
+                out = subprocess.run(shlex.split(scanimage) + ["-f", "%d\t%v\t%m\t%t%n"], capture_output=True, text=True, errors="replace", timeout=60, **quiet())
                 asked = out.returncode == 0        # SANE answered: NAPS2, which asks SANE too, would find no more
                 for line in out.stdout.splitlines():
                     parts = line.split("\t")
@@ -1710,19 +2349,21 @@ class Naps2:
                         found.append({"id": parts[0], "name": name, "backend": backend, "key": _model_key(parts[2])})
             except (OSError, subprocess.SubprocessError):
                 pass
-        if not found and not asked and self.cmd:
+        for driver in self.drivers if self.cmd and not found and not asked else ():
             try:
-                out = subprocess.run(self.cmd + ["--listdevices", "--driver", self.driver], capture_output=True, text=True, timeout=90, env=self._env())
-                for line in out.stdout.splitlines():
+                out = subprocess.run(self.cmd + ["--listdevices", "--driver", driver], capture_output=True, timeout=90, env=self._env(), **quiet())
+                for line in said(out.stdout).splitlines():
                     line = line.strip()
-                    if not line or any(w in line for w in ("not available", "could not", "error")):
+                    if not line or error_of(line) or any(w in line for w in ("not available", "could not", "error")):
                         continue
                     m = re.match(r"^(.*\S)\s+\(([^()]+)\)$", line)
                     inner = m.group(2) if m else ""
-                    found.append({"id": inner if inner.startswith("escl:") else None, "name": line, "backend": inner.split(":")[0] or self.driver,
-                                  "key": _model_key(m.group(1) if m else line)})
+                    found.append({"id": inner if inner.startswith("escl:") else None, "name": line, "driver": driver,
+                                  "backend": (inner.split(":")[0] if driver == "sane" else "") or driver, "key": _model_key(m.group(1) if m else line)})
             except (OSError, subprocess.SubprocessError):
                 pass
+            if found:
+                break                  # the usual driver sees it: the others are not asked
         rank = {b: i for i, b in enumerate(_BACKEND_ORDER)}
         return sorted(found, key=lambda d: rank.get(d["backend"], len(rank)))
 
@@ -1734,7 +2375,7 @@ class Naps2:
   <ScanProfile>
     <Version>2</Version>
     <Device><ID>{x(device["id"])}</ID><Name>{x(device["name"])}</Name></Device>
-    <DriverName>{self.driver}</DriverName>
+    <DriverName>{device.get("driver") or self.driver}</DriverName>
     <DisplayName>readers-scanner</DisplayName>
     <IsDefault>true</IsDefault>
     <BitDepth>C24Bit</BitDepth>
@@ -1760,21 +2401,21 @@ class Naps2:
             self._profile(device, source, pagesize, deskew)
             cmd = self.cmd + ["-p", "readers-scanner"]
         else:
-            cmd = self.cmd + ["--noprofile", "--driver", self.driver, "--device", re.sub(r"\s+\([^()]*\)$", "", device["name"]),
+            shown = device["name"] if (device.get("driver") or self.driver) != "sane" else re.sub(r"\s+\([^()]*\)$", "", device["name"])
+            cmd = self.cmd + ["--noprofile", "--driver", device.get("driver") or self.driver, "--device", shown,
                               "--source", source, "--dpi", str(DPI), "--bitdepth", "color", "--pagesize", pagesize.lower()] + (["--deskew"] if deskew else [])
         cmd += ["-o", out, "--jpegquality", str(JPEG_QUALITY), "-f", "-v"]
-        code, said = None, ""
+        code, words = None, ""
         self._cancelled = False
         try:
-            self.proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, errors="replace", env=self._env())
-            for line in self.proc.stdout:
-                line = line.strip()
+            self.proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=self._env(), **quiet())
+            for raw in self.proc.stdout:
+                line = said(raw).strip()
                 m = re.match(r"Scanned page (\d+)", line)
                 if m and on_page:
                     on_page(int(m.group(1)))
-                for needle, c in _ERRORS:
-                    if needle.lower() in line.lower() and code is None:
-                        code, said = c, line
+                if code is None:
+                    code, words = error_in(raw)
             self.proc.wait()
         except OSError as e:
             return [], "driver", str(e)
@@ -1786,15 +2427,18 @@ class Naps2:
         files = sorted(os.path.join(out_dir, f) for f in os.listdir(out_dir) if f.lower().endswith(".jpg"))
         if files:
             return files, None, ""
-        return [], code or "unknown", said
+        return [], code or "unknown", words
 
     def cancel(self):
         p = self.proc
         if p is not None:
             self._cancelled = True
             try:
-                p.send_signal(signal.SIGINT)
-                threading.Timer(3, lambda: p.poll() is None and p.terminate()).start()
+                if sys.platform == "win32":
+                    p.terminate()      # no signal to send there; NAPS2's worker leaves with its parent
+                else:
+                    p.send_signal(signal.SIGINT)
+                    threading.Timer(3, lambda: p.poll() is None and p.terminate()).start()
             except OSError:
                 pass
 
@@ -1802,7 +2446,9 @@ class Naps2:
 def page_size_of(cfg):
     fmt = cfg.get("format", "auto")
     if fmt == "auto":
-        country = (locale.getlocale()[0] or os.environ.get("LANG", "") or "").split(".")[0][-2:].upper()
+        country = (os.environ.get("LC_ALL") or os.environ.get("LC_PAPER") or os.environ.get("LANG") or "").split(".")[0][-2:].upper()
+        if not country.isalpha() or len(country) != 2:
+            country = system_locale()[-2:].upper()
         return "Letter" if country in ("US", "CA", "MX", "PH", "CL", "CO") else "A4"
     return "Letter" if fmt == "letter" else "A4"
 
@@ -2718,15 +3364,15 @@ class SettingsDialog(QtWidgets.QDialog):
 
 
 def pdf_page(pdf, index, cache_dir, dpi=130):
-    """Page `index` of a PDF as a picture (poppler's pdftoppm), kept beside the document."""
+    """Page `index` of a PDF as a picture, kept beside the document."""
     out = os.path.join(cache_dir, f"{index + 1}-{dpi}.jpg")
     if not os.path.exists(out) or os.path.getmtime(out) < os.path.getmtime(pdf):
-        exe = shutil.which("pdftoppm")
-        if not exe:
-            return None
-        os.makedirs(cache_dir, exist_ok=True)
-        subprocess.run([exe, "-f", str(index + 1), "-l", str(index + 1), "-r", str(dpi), "-jpeg", "-singlefile", pdf, out[:-4]],
-                       capture_output=True, timeout=120)
+        try:
+            made = pdf_pictures(pdf, cache_dir, f"page{index + 1}-{dpi}", dpi, index + 1, index + 1)
+        except Exception:
+            made = []
+        if made:
+            os.replace(made[0], out)
     return QtGui.QImage(out) if os.path.exists(out) else None
 
 
@@ -3465,8 +4111,8 @@ class Main(QtWidgets.QMainWindow):
             for i in range(n):
                 out = os.path.join(folder, f"{base}.jpg" if n == 1 else f"{base} - {i + 1}.jpg")
                 if d.get("remote"):
-                    exe = shutil.which("pdftoppm")
-                    exe and subprocess.run([exe, "-f", str(i + 1), "-l", str(i + 1), "-r", "200", "-jpeg", "-singlefile", pdf, out[:-4]], capture_output=True, timeout=120)
+                    made = pdf_pictures(pdf, os.path.join(self.store.dir(d["id"]), "render"), f"copy{i + 1}", 200, i + 1, i + 1, quality=90)
+                    made and shutil.move(made[0], out)
                 else:
                     src = self.store.page_file(d["id"], d["pages"][i]["id"])
                     if os.path.exists(src):
@@ -3860,12 +4506,7 @@ class Main(QtWidgets.QMainWindow):
             files = []
             for p in paths:
                 if p.lower().endswith(".pdf"):
-                    exe = shutil.which("pdftoppm")
-                    if not exe:
-                        raise RuntimeError(_("poppler-utils is needed to read a PDF"))
-                    base = os.path.join(out, f"f{len(files):04d}")
-                    subprocess.run([exe, "-r", str(DPI), "-jpeg", "-jpegopt", "quality=88", p, base], capture_output=True, timeout=600)
-                    files += sorted(os.path.join(out, f) for f in os.listdir(out) if f.startswith(os.path.basename(base)))
+                    files += pdf_pictures(p, out, f"f{len(files):04d}", DPI)
                 else:
                     dst = os.path.join(out, f"f{len(files):04d}.jpg")
                     import_image(p, dst)
@@ -4049,7 +4690,99 @@ def _icon():
     return QtGui.QIcon.fromTheme(APP)
 
 
+def self_test(report):
+    """What a build must be able to do before it is given to anyone, without a scanner and
+    without the network: `--self-test REPORT` writes what it found and leaves with 0 or 1."""
+    import tempfile
+    from PIL import ImageDraw, ImageFont
+    lines, bad = [], []
+
+    def check(label, ok, detail=""):
+        lines.append(("ok    " if ok else "FAIL  ") + label + (f"  [{detail}]" if detail else ""))
+        ok or bad.append(label)
+
+    tmp = tempfile.mkdtemp(prefix="rs-self-")
+    try:
+        lines.append(f"Reader's Scanner {VERSION} on {sys.platform}, frozen: {bool(getattr(sys, 'frozen', False))}")
+        reader = Reader(tmp)
+        reader.prefer_best = False                     # no network here: the models that came with the app
+        exe = reader.exe()
+        check("Tesseract is there", bool(exe), str(exe))
+        folder, langs = reader.system()
+        check("with its models for the orientation and for English", "osd" in langs and "eng" in langs, f"{folder}: {langs}")
+        page = Image.new("RGB", (2480, 3508), "white")
+        draw = ImageDraw.Draw(page)
+        try:
+            font = ImageFont.load_default(size=110)
+        except TypeError:
+            font = ImageFont.load_default()
+        for i, words in enumerate(("Invoice number 2026", "Total amount 106.37", "Thank you for your order")):
+            draw.text((260, 400 + i * 260), words, font=font, fill="black")
+        try:                                           # a letter's worth of lines: the orientation needs them
+            small = ImageFont.load_default(size=58)
+        except TypeError:
+            small = font
+        for i in range(14):
+            draw.text((260, 1300 + i * 130), "We thank you for your trust and remain at your disposal for any question.", font=small, fill="black")
+        jpg = os.path.join(tmp, "page.jpg")
+        page.save(jpg, "JPEG", quality=JPEG_QUALITY, dpi=(DPI, DPI))
+        text, layers = [""], [[]]
+        try:
+            text, layers, _by = reader.read([jpg], "eng", os.path.join(tmp, "read"))
+        except ReadError as e:
+            check("a page is read", False, str(e))
+        check("a page is read, figures included", "Invoice number 2026" in text[0] and "106.37" in text[0], text[0][:120].replace("\n", " / "))
+        page.rotate(180).save(os.path.join(tmp, "down.jpg"), "JPEG", quality=JPEG_QUALITY, dpi=(DPI, DPI))
+        turn = upright_rotations([os.path.join(tmp, "down.jpg")], reader)
+        check("a page upside down is seen as such", list(turn.values()) == [180], str(turn))
+        pdf = write_pdf([jpg], os.path.join(tmp, "doc.pdf"), "self-test", layers)
+        check("the PDF is written", bool(pdf) and os.path.getsize(pdf) > 50_000)
+        try:
+            import pypdfium2
+            with _pdfium_lock:
+                doc = pypdfium2.PdfDocument(pdf)
+                inside = doc[0].get_textpage().get_text_range()
+                doc.close()
+            check("its text can be found in it", "Invoice number 2026" in " ".join(inside.split()), inside[:80])
+        except ImportError:
+            lines.append("      (pypdfium2 is not here: the PDF's text is checked by the test suite with poppler)")
+        try:
+            made = pdf_pictures(pdf, os.path.join(tmp, "render"), "p", 100)
+            check("and its pages shown", len(made) == 1 and Image.open(made[0]).size[0] in range(820, 835), str(made))
+        except Exception as e:
+            check("and its pages shown", False, str(e))
+        naps2 = Naps2(tmp)
+        lines.append(f"      NAPS2: {' '.join(naps2.cmd) + ' ' + str(naps2.version) if naps2.cmd else 'not installed on this computer'}")
+        if naps2.cmd:
+            found = naps2.devices()
+            lines.append(f"      scanners: {[d['name'] for d in found] or 'none'}")
+        app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv[:1])
+        w = Main()
+        w.show()
+        app.processEvents()
+        check("the window opens", w.isVisible() and w.scan_button.text() == _("scan"))
+        w.quitting = True
+        w.close()
+    except Exception as e:                             # whatever it is, it goes in the report
+        import traceback
+        check("no surprise", False, f"{e!r} {traceback.format_exc()[-600:]}")
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+    lines.append("FAILED: " + ", ".join(bad) if bad else "all good")
+    out = "\n".join(lines) + "\n"
+    if report and report != "-":
+        with open(report, "w", encoding="utf-8") as f:
+            f.write(out)
+    else:
+        sys.stdout.write(out)
+        sys.stdout.flush()
+    os._exit(1 if bad else 0)
+
+
 def main():
+    if "--self-test" in sys.argv:
+        at = sys.argv.index("--self-test")
+        self_test(sys.argv[at + 1] if len(sys.argv) > at + 1 else "-")
     credentials_cli(sys.argv)
     try:
         locale.setlocale(locale.LC_TIME, "")

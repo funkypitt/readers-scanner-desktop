@@ -68,3 +68,29 @@ both sides (phone: in the source, for the release after 1.1.0):
 - `deleteLater()` alone leaves the old widgets drawn until the event loop turns: `clear(layout)`
   hides and unparents them first.
 - A test process that ends with `os._exit` must flush: `sys.stdout.reconfigure(line_buffering=True)`.
+
+## Windows and macOS (2026-09-27)
+
+Built and tested only on GitHub's machines (`.github/workflows/desktop-builds.yml`): there is no
+Windows or Mac here, and no runner has a scanner.
+
+- **Tesseract travels with the app**: conda-forge's build (old systems too), gathered with the
+  libraries it needs by `tools/bundle_tesseract.py`, with the models for orientation and English;
+  the app finds it in `tesseract/` beside itself and tells it where its models are
+  (`TESSDATA_PREFIX`). Other languages: the best model, fetched at the first reading, as on Linux.
+- **PDF pages as pictures**: pypdfium2 where it is installed (the builds carry it), poppler's
+  pdftoppm otherwise (the .deb). pdfium does one thing at a time: `_pdfium_lock`.
+- **NAPS2 on Windows speaks the system's language** whatever the environment says (.NET
+  Framework; `SetCulturesFromConfig` is only called with `--progress`), and nobody says in which
+  code page a program without a console writes. `parts/18_naps2_words.py` (written by
+  `tools/naps2_messages.py` from NAPS2's own resources) has its sentences in 46 languages;
+  `error_in` tries the likely code pages until the line is one of them. A sentence not
+  recognised is shown as NAPS2 wrote it, and « automatic » still goes on to the glass.
+- Drivers: Windows `wia` then `twain`, macOS `apple` then `escl`; the scanners are listed by
+  name and a scan names its scanner (`--device`), NAPS2 looking for it again each time.
+- Windows: every program is started with CREATE_NO_WINDOW (otherwise a console flashes at each
+  page read); cancelling ends NAPS2's process (no signal to send there).
+- Windows: an installer (Inno Setup, per user, no administrator rights) rather than one big
+  .exe, which would unpack 200 MB at every start.
+- The tests' places and drivers: `READERS_SCANNER_HOME`, `READERS_SCANNER_DRIVER`,
+  `READERS_SCANNER_TESSERACT`, `READERS_SCANNER_NAPS2`, `READERS_SCANNER_SCANIMAGE`.

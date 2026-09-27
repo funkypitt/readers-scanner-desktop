@@ -6,8 +6,9 @@ import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
 W, H = 2480, 3508
-BOLD = "/usr/share/fonts/truetype/dejavu/DejaVuSerif-Bold.ttf"
-SERIF = "/usr/share/fonts/truetype/dejavu/DejaVuSerif.ttf"
+FONTS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fonts")      # DejaVu, free to pass on
+BOLD = os.path.join(FONTS, "DejaVuSerif-Bold.ttf")
+SERIF = os.path.join(FONTS, "DejaVuSerif.ttf")
 rng = np.random.default_rng(7)
 
 

@@ -4,9 +4,10 @@ moved and deleted alike; the PDF comes down only when asked. Needs wsgidav (pip 
 cheroot, or WSGIDAV=/path/to/wsgidav). Run: python3 tests/test_sync.py"""
 import glob, json, os, shutil, socket, subprocess, sys, tempfile, time
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-TMP = tempfile.mkdtemp(prefix="rs-sync-")
-os.environ.update(XDG_CONFIG_HOME=TMP + "/config", XDG_DATA_HOME=TMP + "/data", LANG="en_US.UTF-8", LC_ALL="en_US.UTF-8")
+HERE = os.path.dirname(os.path.abspath(__file__)).replace("\\", "/")
+PY = sys.executable.replace("\\", "/")
+TMP = os.path.realpath(tempfile.mkdtemp(prefix="rs-sync-")).replace("\\", "/")
+os.environ.update(READERS_SCANNER_HOME=TMP, READERS_SCANNER_DRIVER="sane", LANG="en_US.UTF-8", LC_ALL="en_US.UTF-8")
 sys.path.insert(0, os.path.dirname(HERE))
 sys.stdout.reconfigure(line_buffering=True)
 import readers_scanner as rs
@@ -15,7 +16,7 @@ WSGIDAV = os.environ.get("WSGIDAV") or shutil.which("wsgidav")
 if not WSGIDAV:
     sys.exit("wsgidav not found: pip install wsgidav cheroot, or set WSGIDAV")
 PAGES = TMP + "/pages"
-subprocess.run([sys.executable, HERE + "/make_pages.py", PAGES], check=True, capture_output=True)
+subprocess.run([PY, HERE + "/make_pages.py", PAGES], check=True)
 failed = []
 
 
@@ -31,7 +32,7 @@ with socket.socket() as s:
 ROOT = TMP + "/dav"
 os.makedirs(ROOT)
 with open(TMP + "/dav.yaml", "w") as f:
-    f.write(f'host: 127.0.0.1\nport: {PORT}\nprovider_mapping:\n  "/": {ROOT}\nhttp_authenticator:\n  domain_controller: null\n  accept_basic: true\n'
+    f.write(f'host: 127.0.0.1\nport: {PORT}\nprovider_mapping:\n  "/": "{ROOT}"\nhttp_authenticator:\n  domain_controller: null\n  accept_basic: true\n'
             '  accept_digest: false\n  default_to_digest: false\nsimple_dc:\n  user_mapping:\n    "*":\n      "test":\n        password: "x"\nverbose: 1\n'
             'logging:\n  enable: false\n')
 server = subprocess.Popen([WSGIDAV, "--config", TMP + "/dav.yaml"], stdout=open(TMP + "/dav.log", "w"), stderr=subprocess.STDOUT)

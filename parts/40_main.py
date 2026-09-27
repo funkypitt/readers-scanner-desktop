@@ -1,15 +1,15 @@
 
 
 def pdf_page(pdf, index, cache_dir, dpi=130):
-    """Page `index` of a PDF as a picture (poppler's pdftoppm), kept beside the document."""
+    """Page `index` of a PDF as a picture, kept beside the document."""
     out = os.path.join(cache_dir, f"{index + 1}-{dpi}.jpg")
     if not os.path.exists(out) or os.path.getmtime(out) < os.path.getmtime(pdf):
-        exe = shutil.which("pdftoppm")
-        if not exe:
-            return None
-        os.makedirs(cache_dir, exist_ok=True)
-        subprocess.run([exe, "-f", str(index + 1), "-l", str(index + 1), "-r", str(dpi), "-jpeg", "-singlefile", pdf, out[:-4]],
-                       capture_output=True, timeout=120)
+        try:
+            made = pdf_pictures(pdf, cache_dir, f"page{index + 1}-{dpi}", dpi, index + 1, index + 1)
+        except Exception:
+            made = []
+        if made:
+            os.replace(made[0], out)
     return QtGui.QImage(out) if os.path.exists(out) else None
 
 
@@ -748,8 +748,8 @@ class Main(QtWidgets.QMainWindow):
             for i in range(n):
                 out = os.path.join(folder, f"{base}.jpg" if n == 1 else f"{base} - {i + 1}.jpg")
                 if d.get("remote"):
-                    exe = shutil.which("pdftoppm")
-                    exe and subprocess.run([exe, "-f", str(i + 1), "-l", str(i + 1), "-r", "200", "-jpeg", "-singlefile", pdf, out[:-4]], capture_output=True, timeout=120)
+                    made = pdf_pictures(pdf, os.path.join(self.store.dir(d["id"]), "render"), f"copy{i + 1}", 200, i + 1, i + 1, quality=90)
+                    made and shutil.move(made[0], out)
                 else:
                     src = self.store.page_file(d["id"], d["pages"][i]["id"])
                     if os.path.exists(src):
@@ -1143,12 +1143,7 @@ class Main(QtWidgets.QMainWindow):
             files = []
             for p in paths:
                 if p.lower().endswith(".pdf"):
-                    exe = shutil.which("pdftoppm")
-                    if not exe:
-                        raise RuntimeError(_("poppler-utils is needed to read a PDF"))
-                    base = os.path.join(out, f"f{len(files):04d}")
-                    subprocess.run([exe, "-r", str(DPI), "-jpeg", "-jpegopt", "quality=88", p, base], capture_output=True, timeout=600)
-                    files += sorted(os.path.join(out, f) for f in os.listdir(out) if f.startswith(os.path.basename(base)))
+                    files += pdf_pictures(p, out, f"f{len(files):04d}", DPI)
                 else:
                     dst = os.path.join(out, f"f{len(files):04d}.jpg")
                     import_image(p, dst)
@@ -1332,7 +1327,99 @@ def _icon():
     return QtGui.QIcon.fromTheme(APP)
 
 
+def self_test(report):
+    """What a build must be able to do before it is given to anyone, without a scanner and
+    without the network: `--self-test REPORT` writes what it found and leaves with 0 or 1."""
+    import tempfile
+    from PIL import ImageDraw, ImageFont
+    lines, bad = [], []
+
+    def check(label, ok, detail=""):
+        lines.append(("ok    " if ok else "FAIL  ") + label + (f"  [{detail}]" if detail else ""))
+        ok or bad.append(label)
+
+    tmp = tempfile.mkdtemp(prefix="rs-self-")
+    try:
+        lines.append(f"Reader's Scanner {VERSION} on {sys.platform}, frozen: {bool(getattr(sys, 'frozen', False))}")
+        reader = Reader(tmp)
+        reader.prefer_best = False                     # no network here: the models that came with the app
+        exe = reader.exe()
+        check("Tesseract is there", bool(exe), str(exe))
+        folder, langs = reader.system()
+        check("with its models for the orientation and for English", "osd" in langs and "eng" in langs, f"{folder}: {langs}")
+        page = Image.new("RGB", (2480, 3508), "white")
+        draw = ImageDraw.Draw(page)
+        try:
+            font = ImageFont.load_default(size=110)
+        except TypeError:
+            font = ImageFont.load_default()
+        for i, words in enumerate(("Invoice number 2026", "Total amount 106.37", "Thank you for your order")):
+            draw.text((260, 400 + i * 260), words, font=font, fill="black")
+        try:                                           # a letter's worth of lines: the orientation needs them
+            small = ImageFont.load_default(size=58)
+        except TypeError:
+            small = font
+        for i in range(14):
+            draw.text((260, 1300 + i * 130), "We thank you for your trust and remain at your disposal for any question.", font=small, fill="black")
+        jpg = os.path.join(tmp, "page.jpg")
+        page.save(jpg, "JPEG", quality=JPEG_QUALITY, dpi=(DPI, DPI))
+        text, layers = [""], [[]]
+        try:
+            text, layers, _by = reader.read([jpg], "eng", os.path.join(tmp, "read"))
+        except ReadError as e:
+            check("a page is read", False, str(e))
+        check("a page is read, figures included", "Invoice number 2026" in text[0] and "106.37" in text[0], text[0][:120].replace("\n", " / "))
+        page.rotate(180).save(os.path.join(tmp, "down.jpg"), "JPEG", quality=JPEG_QUALITY, dpi=(DPI, DPI))
+        turn = upright_rotations([os.path.join(tmp, "down.jpg")], reader)
+        check("a page upside down is seen as such", list(turn.values()) == [180], str(turn))
+        pdf = write_pdf([jpg], os.path.join(tmp, "doc.pdf"), "self-test", layers)
+        check("the PDF is written", bool(pdf) and os.path.getsize(pdf) > 50_000)
+        try:
+            import pypdfium2
+            with _pdfium_lock:
+                doc = pypdfium2.PdfDocument(pdf)
+                inside = doc[0].get_textpage().get_text_range()
+                doc.close()
+            check("its text can be found in it", "Invoice number 2026" in " ".join(inside.split()), inside[:80])
+        except ImportError:
+            lines.append("      (pypdfium2 is not here: the PDF's text is checked by the test suite with poppler)")
+        try:
+            made = pdf_pictures(pdf, os.path.join(tmp, "render"), "p", 100)
+            check("and its pages shown", len(made) == 1 and Image.open(made[0]).size[0] in range(820, 835), str(made))
+        except Exception as e:
+            check("and its pages shown", False, str(e))
+        naps2 = Naps2(tmp)
+        lines.append(f"      NAPS2: {' '.join(naps2.cmd) + ' ' + str(naps2.version) if naps2.cmd else 'not installed on this computer'}")
+        if naps2.cmd:
+            found = naps2.devices()
+            lines.append(f"      scanners: {[d['name'] for d in found] or 'none'}")
+        app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv[:1])
+        w = Main()
+        w.show()
+        app.processEvents()
+        check("the window opens", w.isVisible() and w.scan_button.text() == _("scan"))
+        w.quitting = True
+        w.close()
+    except Exception as e:                             # whatever it is, it goes in the report
+        import traceback
+        check("no surprise", False, f"{e!r} {traceback.format_exc()[-600:]}")
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+    lines.append("FAILED: " + ", ".join(bad) if bad else "all good")
+    out = "\n".join(lines) + "\n"
+    if report and report != "-":
+        with open(report, "w", encoding="utf-8") as f:
+            f.write(out)
+    else:
+        sys.stdout.write(out)
+        sys.stdout.flush()
+    os._exit(1 if bad else 0)
+
+
 def main():
+    if "--self-test" in sys.argv:
+        at = sys.argv.index("--self-test")
+        self_test(sys.argv[at + 1] if len(sys.argv) > at + 1 else "-")
     credentials_cli(sys.argv)
     try:
         locale.setlocale(locale.LC_TIME, "")

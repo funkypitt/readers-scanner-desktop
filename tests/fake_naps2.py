@@ -8,7 +8,11 @@ English messages), pages taken from a folder instead of a scanner.
   $FAKE_SCANNER/offline       (a file) the scanner does not answer; "offline-<backend>": on that driver only
   $FAKE_SCANNER/nofeeder      the scanner has no feeder
   $FAKE_SCANNER/slow          seconds per page (a number in the file)
+  $FAKE_SCANNER/speaks        a language ("fr") and a code page ("cp850"): as on Windows, where NAPS2
+                              answers in the system's language whatever it is asked
   $FAKE_SCANNER/log.txt       every call, for the tests to read
+
+With --driver wia, twain or apple the scanners are listed by their names alone, as NAPS2 does there.
 """
 import os, re, shutil, sys, time
 
@@ -29,8 +33,31 @@ def devices():
         return []
 
 
+FRENCH = {   # NAPS2 8.2.1, SdkResources.fr.resx
+    "No pages are in the feeder.": "Il n'y a aucune page dans le dispositif d'alimentation.",
+    "The selected scanner is offline.": "Le scanner sélectionné est éteint.",
+    "The selected scanner could not be found.": "Le scanner sélectionné est introuvable.",
+}
+try:
+    speaks = open(os.path.join(root, "speaks"), encoding="utf-8").read().split()
+except OSError:
+    speaks = []
+
+
+def say(words):
+    if speaks:
+        words = FRENCH.get(words, words) if speaks[0] == "fr" else words
+        sys.stdout.flush()
+        sys.stdout.buffer.write((words + "\n").encode(speaks[1] if len(speaks) > 1 else "utf-8", "replace"))
+        sys.stdout.buffer.flush()
+    else:
+        print(words)
+
+
 def display(d):
     backend = d[0].split(":")[0]
+    if opt("--driver", "sane") != "sane":
+        return f"{d[1]} {d[2]}"
     if backend == "escl":
         return f"{d[1]} {d[2]} ({d[0]})"
     if backend == "airscan":
@@ -47,7 +74,8 @@ if "--help" in args:
 if "--listdevices" in args:
     time.sleep(0.2)
     for d in devices():
-        print(display(d))
+        if opt("--driver", "sane") == "sane" or d[0].split(":")[0] == opt("--driver"):
+            print(display(d))
     sys.exit(0)
 
 source, device_id, name = "glass", None, None
@@ -67,7 +95,7 @@ else:
     time.sleep(0.3)          # NAPS2 looks for the scanners first
     match = [d for d in devices() if name and name.lower() in display(d).lower()]
     if not match:
-        print("The selected scanner could not be found."); sys.exit(0)
+        say("The selected scanner could not be found."); sys.exit(0)
     device_id = match[0][0]
 
 out = opt("-o") or opt("--output")
@@ -78,7 +106,7 @@ known = [d[0] for d in devices()]
 
 
 def fail(words):
-    print(words)
+    say(words)
     print("0 page(s) scanned.")
     print("No scanned pages to export.")
     sys.exit(0)

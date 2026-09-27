@@ -1,0 +1,6 @@
+Reader's Scanner needs NAPS2 to drive the scanner.
+
+NAPS2 is free and open source; it is not installed by this program.
+Get it from https://www.naps2.com/download, before or after this installation.
+
+Without NAPS2, Reader's Scanner still files the pictures and PDFs you hand it, but cannot scan.

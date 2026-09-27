@@ -1,0 +1,299 @@
+# Windows, macOS and Linux builds of Reader's Scanner — each one tested where it will run.
+#
+# Runs on a v* tag (the files are attached to the release of that tag) and on demand from the
+# Actions tab (the files are then kept as artifacts for a few days; "only" limits the run to one
+# system).
+#
+# On every system: the three test suites (engine, window, sync), then the build, then the built
+# app's own --self-test (it reads a page, writes its PDF, shows it, opens the window), then the
+# same once the real NAPS2 is installed on the runner. No runner has a scanner: what a scan does
+# with a real one is tested with the stand-in of tests/fake_naps2.py.
+#
+# Windows and macOS carry their own Tesseract (conda-forge's build, gathered by
+# tools/bundle_tesseract.py) and pdfium; the .deb depends on the distribution's.
+#
+# Neither binary is signed: Windows shows a SmartScreen warning, macOS refuses the app until it
+# is allowed in System Settings. The README says so to the reader.
+
+name: Builds
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      only:
+        description: one system only
+        type: choice
+        default: all
+        options: [all, windows, macos-apple-silicon, macos-intel, linux]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: ${{ matrix.target }}
+    if: ${{ inputs.only != 'linux' }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    # Intel Macs are a paid or vanishing runner label; if it fails, the others still ship.
+    continue-on-error: ${{ matrix.target == 'macos-intel' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(
+          inputs.only == 'windows' && '[{"os":"windows-latest","target":"windows"}]' ||
+          inputs.only == 'macos-apple-silicon' && '[{"os":"macos-15","target":"macos-apple-silicon"}]' ||
+          inputs.only == 'macos-intel' && '[{"os":"macos-15-intel","target":"macos-intel"}]' ||
+          '[{"os":"windows-latest","target":"windows"},{"os":"macos-15","target":"macos-apple-silicon"},{"os":"macos-15-intel","target":"macos-intel"}]') }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: The app's own version number
+        shell: bash
+        run: |
+          ./build.sh
+          git diff --exit-code readers_scanner.py      # the file in the repository is the parts glued
+          echo "VERSION=$(sed -n 's/^VERSION = "\(.*\)"/\1/p' readers_scanner.py)" >> "$GITHUB_ENV"
+
+      - name: Install what the app is made of
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          pip install "PyQt5==5.15.11" requests pillow numpy pypdfium2 pyinstaller pefile wsgidav cheroot
+
+      - name: Tesseract to carry, poppler for the tests
+        uses: mamba-org/setup-micromamba@v2
+        with:
+          environment-name: tess
+          create-args: tesseract
+          condarc: |
+            channels: [conda-forge]
+          init-shell: bash
+          cache-environment: true
+
+      - name: Gather Tesseract
+        shell: bash -el {0}
+        run: |
+          micromamba create -y -q -n pop -c conda-forge poppler
+          python tools/bundle_tesseract.py "$MAMBA_ROOT_PREFIX/envs/tess" bundle/tesseract
+
+      - name: The tests
+        shell: bash -el {0}
+        run: |
+          here=$(python -c "import os; print(os.getcwd().replace(chr(92), '/'))")
+          pop=$(python -c "import os; print(os.path.join(os.environ['MAMBA_ROOT_PREFIX'], 'envs', 'pop').replace(chr(92), '/'))")
+          if [ "$RUNNER_OS" = Windows ]; then
+            export READERS_SCANNER_TESSERACT="$here/bundle/tesseract/tesseract.exe"
+            export PATH="$(cygpath -u "$pop")/Library/bin:$PATH"
+          else
+            export READERS_SCANNER_TESSERACT="$here/bundle/tesseract/bin/tesseract"
+            export PATH="$pop/bin:$PATH"
+          fi
+          export TESSDATA_PREFIX="$here/bundle/tesseract/tessdata"
+          pdftotext -v 2>&1 | head -1
+          python tests/test_engine.py
+          python tests/test_sync.py
+          python tests/test_ui.py shots
+
+      - name: The window as the tests saw it
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: screenshots-${{ matrix.target }}
+          path: shots/*
+          if-no-files-found: ignore
+
+      # ---------------------------------------------------------------- Windows: an installer
+      - name: Build the app and its installer
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          pyinstaller --noconfirm --windowed \
+            --name "Readers Scanner" \
+            --icon packaging/readers-scanner.ico \
+            --add-data "packaging/readers-scanner.png;." \
+            --add-data "bundle/tesseract;tesseract" \
+            --collect-all pypdfium2 --collect-all pypdfium2_raw \
+            readers_scanner.py
+          du -sh "dist/Readers Scanner"
+          command -v iscc >/dev/null || choco install innosetup -y --no-progress
+          iscc="$(command -v iscc || echo '/c/Program Files (x86)/Inno Setup 6/ISCC.exe')"
+          mkdir -p out
+          (cd packaging && MSYS2_ARG_CONV_EXCL='*' "$iscc" "/DVersion=$VERSION" "/DSource=..\\dist\\Readers Scanner" "/DOut=..\\out" windows.iss)
+          ls -la out
+
+      - name: Does it install, and does what is installed work? (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $setup = Get-ChildItem out\*_setup.exe | Select-Object -First 1
+          $p = Start-Process -FilePath $setup.FullName -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART' -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "the installer left with $($p.ExitCode)" }
+          $exe = Join-Path $env:LOCALAPPDATA 'Programs\Readers Scanner\Readers Scanner.exe'
+          if (-not (Test-Path $exe)) { throw "nothing at $exe" }
+          "EXE=$exe" | Out-File -FilePath $env:GITHUB_ENV -Append
+          $env:READERS_SCANNER_HOME = "$env:RUNNER_TEMP\self"
+          $t = Measure-Command { $p = Start-Process -FilePath $exe -ArgumentList '--self-test', "$env:RUNNER_TEMP\report.txt" -Wait -PassThru }
+          Get-Content "$env:RUNNER_TEMP\report.txt"
+          Write-Host ("the self-test took {0:n1} s" -f $t.TotalSeconds)
+          if ($p.ExitCode -ne 0) { throw "the self-test failed" }
+          $p = Start-Process -FilePath $exe -PassThru
+          Start-Sleep -Seconds 30
+          if ($p.HasExited) { throw "the app quit on its own (exit code $($p.ExitCode))" }
+          Stop-Process -Id $p.Id
+          Write-Host "it started and was still running"
+
+      # ---------------------------------------------------------------- macOS: a .app in a .dmg
+      - name: Build the .icns
+        if: runner.os == 'macOS'
+        run: |
+          mkdir -p icon.iconset
+          for s in 16 32 128 256 512; do
+            sips -z $s $s packaging/readers-scanner.png --out "icon.iconset/icon_${s}x${s}.png"
+            sips -z $((s * 2)) $((s * 2)) packaging/readers-scanner.png --out "icon.iconset/icon_${s}x${s}@2x.png"
+          done
+          iconutil -c icns icon.iconset -o packaging/readers-scanner.icns
+
+      - name: Build the .app and the .dmg
+        if: runner.os == 'macOS'
+        run: |
+          pyinstaller --noconfirm --windowed \
+            --name "Readers Scanner" \
+            --icon packaging/readers-scanner.icns \
+            --osx-bundle-identifier ch.gallaz.readersscanner \
+            --add-data "packaging/readers-scanner.png:." \
+            --add-data "bundle/tesseract:tesseract" \
+            --collect-all pypdfium2 --collect-all pypdfium2_raw \
+            readers_scanner.py
+          # Ad hoc signature: on Apple Silicon an unsigned binary does not start at all.
+          codesign --force --deep --sign - "dist/Readers Scanner.app"
+          codesign --verify --deep --strict "dist/Readers Scanner.app"
+          du -sh "dist/Readers Scanner.app"
+          mkdir -p dmg out
+          cp -R "dist/Readers Scanner.app" dmg/
+          ln -s /Applications dmg/Applications
+          ARCH=$([ "${{ matrix.target }}" = "macos-intel" ] && echo intel || echo apple-silicon)
+          made=
+          for try in 1 2 3; do
+            if hdiutil create -volname "Readers Scanner" -srcfolder dmg -ov -format UDZO \
+                 "out/readers-scanner_${VERSION}_macos_${ARCH}.dmg"; then made=yes; break; fi
+            echo "the folder was busy, waiting before try $((try + 1))"
+            sleep 15
+          done
+          [ -n "$made" ]
+          ls -la out
+
+      - name: Does what is in the .dmg work? (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          # from the disk image, as the reader will have it, and away from the build's folders
+          hdiutil attach out/*.dmg -mountpoint /tmp/rs-dmg -nobrowse -quiet
+          cp -R "/tmp/rs-dmg/Readers Scanner.app" "$RUNNER_TEMP/"
+          hdiutil detach /tmp/rs-dmg -quiet
+          EXE="$RUNNER_TEMP/Readers Scanner.app/Contents/MacOS/Readers Scanner"
+          echo "EXE=$EXE" >> "$GITHUB_ENV"
+          otool -l "$RUNNER_TEMP/Readers Scanner.app/Contents/Frameworks/tesseract/bin/tesseract" | grep -A3 -E "LC_BUILD_VERSION|LC_VERSION_MIN" | grep -E "minos|version" | head -2 || true
+          export READERS_SCANNER_HOME="$RUNNER_TEMP/self" QT_QPA_PLATFORM=offscreen
+          time "$EXE" --self-test "$RUNNER_TEMP/report.txt" || failed=yes
+          cat "$RUNNER_TEMP/report.txt"
+          [ -z "$failed" ]
+          "$EXE" &
+          PID=$!
+          sleep 30
+          kill "$PID" && echo "it started and was still running"
+
+      # ---------------------------------------------------------------- with the real NAPS2
+      - name: NAPS2 itself, on this system
+        id: naps2
+        continue-on-error: true
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = Windows ]; then choco install naps2 -y --no-progress; else brew install --cask naps2; fi
+          export READERS_SCANNER_HOME="$RUNNER_TEMP/real"
+          [ "$RUNNER_OS" = Windows ] || export QT_QPA_PLATFORM=offscreen
+          python tests/real_naps2.py
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: readers-scanner-${{ matrix.target }}
+          path: out/*
+
+      - name: Attach to the release
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            # another job may be creating it at this very moment; then the upload finds it
+            gh release create "$TAG" --title "Reader's Scanner $VERSION" --notes "Reader's Scanner $VERSION" || sleep 5
+          fi
+          gh release upload "$TAG" out/* --clobber
+
+  deb:
+    name: linux (.deb)
+    if: ${{ inputs.only == '' || inputs.only == 'all' || inputs.only == 'linux' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: The app's own version number
+        run: |
+          ./build.sh
+          git diff --exit-code readers_scanner.py
+          echo "VERSION=$(sed -n 's/^VERSION = "\(.*\)"/\1/p' readers_scanner.py)" >> "$GITHUB_ENV"
+
+      - name: What the package depends on, and the tests' tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq fakeroot python3-pyqt5 python3-requests python3-pil python3-numpy tesseract-ocr poppler-utils python3-venv
+          python3 -m venv "$RUNNER_TEMP/dav"
+          "$RUNNER_TEMP/dav/bin/pip" install -q wsgidav cheroot
+
+      - name: The tests
+        run: |
+          export QT_QPA_PLATFORM=offscreen WSGIDAV="$RUNNER_TEMP/dav/bin/wsgidav"
+          python3 tests/test_engine.py
+          python3 tests/test_sync.py
+          python3 tests/test_ui.py shots
+
+      - name: Build the .deb
+        run: |
+          packaging/build-deb.sh
+          mkdir -p out
+          mv "packaging/readers-scanner_${VERSION}_all.deb" out/
+
+      - name: Does it install, and does what is installed work?
+        run: |
+          sudo apt-get install -y -qq ./out/readers-scanner_${VERSION}_all.deb
+          export QT_QPA_PLATFORM=offscreen READERS_SCANNER_HOME="$RUNNER_TEMP/self"
+          readers-scanner --self-test -
+          readers-scanner &
+          PID=$!
+          sleep 20
+          kill "$PID" && echo "it installed, started and was still running"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: readers-scanner-linux
+          path: out/*
+
+      - name: Attach to the release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" --title "Reader's Scanner $VERSION" --notes "Reader's Scanner $VERSION" || sleep 5
+          fi
+          gh release upload "$TAG" out/* --clobber

@@ -3,21 +3,23 @@
 Run: QT_QPA_PLATFORM=offscreen python3 tests/test_ui.py [SHOTS_DIR]"""
 import os, shutil, subprocess, sys, tempfile, time
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-TMP = tempfile.mkdtemp(prefix="rs-ui-")
+HERE = os.path.dirname(os.path.abspath(__file__)).replace("\\", "/")
+PY = sys.executable.replace("\\", "/")
+TMP = os.path.realpath(tempfile.mkdtemp(prefix="rs-ui-")).replace("\\", "/")
 SHOTS = sys.argv[1] if len(sys.argv) > 1 else TMP + "/shots"
 os.makedirs(SHOTS, exist_ok=True)
 LANG = os.environ.get("TEST_LANG", "fr_CH.UTF-8")
-os.environ.update(XDG_CONFIG_HOME=TMP + "/config", XDG_DATA_HOME=TMP + "/data", FAKE_SCANNER=TMP + "/scanner", LANG=LANG, LC_ALL=LANG,
-                  READERS_SCANNER_NAPS2=f"{sys.executable} {HERE}/fake_naps2.py", READERS_SCANNER_SCANIMAGE=f"{sys.executable} {HERE}/fake_scanimage.py")
-os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+os.environ.update(READERS_SCANNER_HOME=TMP, READERS_SCANNER_DRIVER="sane", FAKE_SCANNER=TMP + "/scanner", LANG=LANG, LC_ALL=LANG,
+                  READERS_SCANNER_NAPS2=f"{PY} {HERE}/fake_naps2.py", READERS_SCANNER_SCANIMAGE=f"{PY} {HERE}/fake_scanimage.py")
+if sys.platform != "win32":          # Windows runners have a desktop, and its fonts
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 sys.path.insert(0, os.path.dirname(HERE))
 import readers_scanner as rs
 from PyQt5 import QtCore, QtWidgets, QtTest
 
 _ = rs._
 PAGES = TMP + "/pages"
-subprocess.run([sys.executable, HERE + "/make_pages.py", PAGES], check=True, capture_output=True)
+subprocess.run([PY, HERE + "/make_pages.py", PAGES], check=True)
 SC = os.environ["FAKE_SCANNER"]
 failed, clicks = [], 0
 sys.stdout.reconfigure(line_buffering=True)
@@ -287,7 +289,7 @@ check("from files, without NAPS2: a picture and a two-page PDF → three pages",
 QtTest.QTest.keyClick(w.review.name, QtCore.Qt.Key_Return)
 doc4 = w.current
 check("filed and read like a scan", wait(lambda: w.store.get(doc4)["ocr"] == rs.DONE, 90) and w.store.get(doc4)["name"] == "Contrat de bail")
-os.environ["READERS_SCANNER_NAPS2"] = f"{sys.executable} {HERE}/fake_naps2.py"
+os.environ["READERS_SCANNER_NAPS2"] = f"{PY} {HERE}/fake_naps2.py"
 w.message_action("again")
 check("NAPS2 installed meanwhile: « look again » finds it", w.naps2.cmd is not None)
 
@@ -311,7 +313,7 @@ if WSGIDAV:
         so.bind(("127.0.0.1", 0)); PORT = so.getsockname()[1]
     os.makedirs(TMP + "/dav")
     with open(TMP + "/dav.yaml", "w") as f:
-        f.write(f'host: 127.0.0.1\nport: {PORT}\nprovider_mapping:\n  "/": {TMP}/dav\nhttp_authenticator:\n  domain_controller: null\n  accept_basic: true\n'
+        f.write(f'host: 127.0.0.1\nport: {PORT}\nprovider_mapping:\n  "/": "{TMP}/dav"\nhttp_authenticator:\n  domain_controller: null\n  accept_basic: true\n'
                 '  accept_digest: false\n  default_to_digest: false\nsimple_dc:\n  user_mapping:\n    "*":\n      "test":\n        password: "x"\nverbose: 1\nlogging:\n  enable: false\n')
     server = subprocess.Popen([WSGIDAV, "--config", TMP + "/dav.yaml"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     for _i in range(100):
@@ -369,5 +371,5 @@ print()
 print("FAILED: " + ", ".join(failed) if failed else "all window tests passed")
 print("screenshots in", SHOTS)
 if not failed:
-    shutil.rmtree(TMP + "/data", ignore_errors=True)
+    shutil.rmtree(TMP, ignore_errors=True)
 os._exit(1 if failed else 0)
