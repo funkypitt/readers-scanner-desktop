@@ -627,7 +627,16 @@ def _model_key(name):
     return re.sub(r"[^a-z0-9]", "", n) or re.sub(r"[^a-z0-9]", "", name.lower())
 
 
-_BACKEND_ORDER = ("airscan", "escl")     # driverless first: they work without the maker's software
+# driverless first: they work without the maker's software. sane's own « escl » comes last of
+# all: with a stack in the feeder it handed over one page (HP ScanJet Pro 4500 fn1, 2026-09-27).
+_BACKEND_ORDER = ("airscan",)
+_BACKEND_LAST = ("escl",)
+
+
+def backend_rank(backend):
+    if backend in _BACKEND_ORDER:
+        return _BACKEND_ORDER.index(backend)
+    return len(_BACKEND_ORDER) + (2 if backend in _BACKEND_LAST else 1)
 
 
 class Naps2:
@@ -639,6 +648,8 @@ class Naps2:
             self.cmd = None            # there, but it does not run: as good as absent
         self.proc = None
         self._cancelled = False
+        self.heard = []                # what NAPS2 wrote during the last scans, for whoever must understand one
+        self.alive = 0                 # when the scanner last answered
 
     @staticmethod
     def find():
@@ -740,8 +751,7 @@ class Naps2:
                 pass
             if found:
                 break                  # the usual driver sees it: the others are not asked
-        rank = {b: i for i, b in enumerate(_BACKEND_ORDER)}
-        return sorted(found, key=lambda d: rank.get(d["backend"], len(rank)))
+        return sorted(found, key=lambda d: backend_rank(d["backend"]))
 
     def _profile(self, device, source, pagesize, deskew):
         os.makedirs(self.data, exist_ok=True)
@@ -787,8 +797,10 @@ class Naps2:
             # a group of its own: NAPS2 scans through a helper process, and « cancel » must reach both
             own = {"creationflags": 0x08000000 | 0x00000200} if sys.platform == "win32" else {"start_new_session": True}
             self.proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=self._env(), **own)
+            self.heard = self.heard[-200:] + [f"--- {source} · {device.get('backend') or device.get('driver')} · {datetime.now():%H:%M:%S}"]
             for raw in self.proc.stdout:
                 line = said(raw).strip()
+                line and self.heard.append(line)
                 m = re.match(r"Scanned page (\d+)", line)
                 if m and on_page:
                     on_page(int(m.group(1)))
@@ -857,6 +869,7 @@ def scan_pages(naps2, cfg, source, out_dir, on_page=None, on_state=None):
     key = routes[0]["key"]
     pagesize = page_size_of(cfg)
     last = ("unknown", "")
+    missed = []                        # the ways that did not answer during this scan
     for src in (("feeder", "glass") if source == "auto" else (source,)):
         tries = list(routes)
         while tries:
@@ -864,7 +877,11 @@ def scan_pages(naps2, cfg, source, out_dir, on_page=None, on_state=None):
             on_state and on_state(src)
             for patience in range(5):      # just after a scan the scanner may still be busy: a moment, not an error
                 files, err, said = naps2.scan(route, src, pagesize, out_dir, on_page)
-                if err not in ("busy", "warming") or patience == 4:
+                if files or err in ("empty", "busy", "warming", "nofeeder", "noduplex", "cover", "jam"):
+                    naps2.alive = time.time()
+                # « offline » from a scanner that answered a minute ago is the same moment of absence
+                moment = err in ("busy", "warming") or (err in ("offline", "comm") and patience == 0 and time.time() - naps2.alive < 90)
+                if not moment or patience == 4:
                     break
                 on_state and on_state("waiting")
                 time.sleep(2.5)
@@ -874,10 +891,17 @@ def scan_pages(naps2, cfg, source, out_dir, on_page=None, on_state=None):
                     blank = [f for f in files if is_blank(f)]
                     if len(blank) == len(files):
                         blank = []             # a stack of empty sheets is what was asked for
-                routes = [route] + [r for r in routes if r is not route]
+                # the order of preference stays (the driverless airscan first: on the scanner this was
+                # tried on, sane's own escl gave one page of a stack); a way that failed twice running
+                # goes behind the others
+                for r in routes:
+                    r["misses"] = 0 if r is route else r.get("misses", 0) + (1 if r in missed else 0)
+                routes = sorted(routes, key=lambda r: (r.get("misses", 0) >= 2, backend_rank(r["backend"])))
                 return {"files": [f for f in files if f not in blank], "blank": blank, "source": src, "error": None,
                         "device": {"key": key, "name": route["name"], "routes": routes}}
             last = (err, said)
+            if err in ("notfound", "offline", "comm", "driver", "unknown") and route not in missed:
+                missed.append(route)
             if err == "cancelled":
                 return {"files": [], "error": err, "detail": ""}
             if err in ("empty", "nofeeder", "noduplex", "unknown") and src != "glass":

@@ -505,7 +505,7 @@ class Main(QtWidgets.QMainWindow):
             self.sync()
 
     def delete_folder(self, name):
-        if QtWidgets.QMessageBox.question(self, "reader's scanner", _("Delete the folder “%1”? Its scans stay, in all scans.", name)) == QtWidgets.QMessageBox.Yes:
+        if QtWidgets.QMessageBox.question(self, "reader's scanner", _("Delete the folder “%1”? Its scans stay in all scans.", name)) == QtWidgets.QMessageBox.Yes:
             self.store.delete_folder(name)
             if self.place == name:
                 self.place = FOLDERS

@@ -815,7 +815,7 @@ class SettingsDialog(QtWidgets.QDialog):
         elif r.has_best(lang):
             self.best_state.setText(_("%1: the best model is here", name))
         elif lang in r.system()[1]:
-            self.best_state.setText(_("%1: the system's model for now", name))
+            self.best_state.setText(_("%1: the standard model for now", name))
         else:
             self.best_state.setText(_("%1: its model will be fetched at the first reading", name))
 

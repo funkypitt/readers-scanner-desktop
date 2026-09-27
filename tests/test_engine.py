@@ -85,7 +85,7 @@ scanner()
 n = rs.Naps2(rs.DATA_DIR)
 check("NAPS2 found, version read", n.cmd and n.version == "8.2.1", str(n.version))
 devs = n.devices()
-check("three ways to one scanner, driverless first", [d["backend"] for d in devs] == ["airscan", "escl", "hpaio"] and len({d["key"] for d in devs}) == 1, str(devs))
+check("three ways to one scanner, driverless first", [d["backend"] for d in devs] == ["airscan", "hpaio", "escl"] and len({d["key"] for d in devs}) == 1, str(devs))
 cfg = {"format": "a"}
 out = TMP + "/incoming"
 
@@ -122,7 +122,15 @@ check("the scanner still busy with the scan before: a moment's patience, then th
 
 scanner(feeder=["facture-1.jpg"], flags=["offline-airscan"])
 r = rs.scan_pages(n, cfg, "auto", out)
-check("one driver does not answer → the next one, remembered first", r["error"] is None and r["device"]["routes"][0]["backend"] == "escl", str(r.get("device")))
+check("one driver does not answer → the next one; the order of preference stays", r["error"] is None and [x["backend"] for x in r["device"]["routes"]] == ["airscan", "hpaio", "escl"]
+      and any("hpaio" in l for l in open(n.data + "/profiles.xml")), str(r.get("device")))
+cfg["device"] = r["device"]
+scanner(feeder=["facture-1.jpg"], flags=["offline-airscan"])
+r = rs.scan_pages(n, cfg, "auto", out)
+check("the same driver silent twice running: it goes behind the others", r["error"] is None and [x["backend"] for x in r["device"]["routes"]] == ["hpaio", "escl", "airscan"], str(r.get("device")))
+cfg["device"] = r["device"]
+scanner(feeder=["facture-1.jpg"])
+n.alive = 0
 
 scanner(feeder=["facture-1.jpg"], flags=["offline"])
 t0 = time.time()
