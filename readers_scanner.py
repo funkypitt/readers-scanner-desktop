@@ -2676,12 +2676,14 @@ def read_scaled(path, width, rotation=0):
 
 
 def clear(layout):
-    """Empties a layout: its widgets go at once (hidden, then deleted), not at the next idle moment."""
+    """Empties a layout: its widgets disappear at once and are deleted at the next idle moment.
+    They keep their parent until then: without one, a widget belongs to Python, which destroys
+    it as soon as nothing names it — in the middle of its own click, when the click is what
+    empties the layout (a crash on Windows)."""
     while layout.count():
         w = layout.takeAt(0).widget()
         if w is not None:
             w.hide()
-            w.setParent(None)
             w.deleteLater()
 
 

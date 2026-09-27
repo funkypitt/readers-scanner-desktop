@@ -15,6 +15,8 @@ if sys.platform != "win32":          # Windows runners have a desktop, and its f
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 sys.path.insert(0, os.path.dirname(HERE))
 sys.stdout.reconfigure(encoding="utf-8", line_buffering=True)
+import faulthandler
+faulthandler.enable()          # a crash in Qt says where it happened
 import readers_scanner as rs
 from PyQt5 import QtCore, QtWidgets, QtTest
 
@@ -67,6 +69,8 @@ def settle(ms=400):
     t0 = time.time()
     while time.time() - t0 < ms / 1000:
         app.processEvents(); time.sleep(0.01)
+    # what the app's own loop does at each turn, and processEvents() alone does not
+    QtCore.QCoreApplication.sendPostedEvents(None, QtCore.QEvent.DeferredDelete)
 
 
 def shot(w, name):
@@ -162,7 +166,7 @@ check("both sides: four pages, two blank backs left out", wait(lambda: w.stack.c
 check("the sheet fed upside down is already upright", w.session["pages"][0]["rotation"] == 180, str([p["rotation"] for p in w.session["pages"]]))
 check("the blank pages are said, and can be kept", w.review.blank.isVisible() and "2" in w.review.blank.text(), w.review.blank.text())
 check("nothing left over from the screen before", len([c for c in w.review.grid_host.findChildren(QtWidgets.QWidget) if isinstance(c, (rs.Tile, rs.AddTile)) and c.isVisible()]) == 5
-      and len(w.message.findChildren(QtWidgets.QPushButton)) <= 3)
+      and len([b for b in w.message.findChildren(QtWidgets.QPushButton) if b.isVisible()]) == 0)
 wait(lambda: all(t.picture.image is not None for t in w.review.tiles.values()), 10)
 shot(w, "05-review-duplex")
 tiles = [w.review.grid.itemAt(i).widget() for i in range(w.review.grid.count())]

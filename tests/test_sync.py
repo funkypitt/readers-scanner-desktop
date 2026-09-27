@@ -10,6 +10,8 @@ TMP = os.path.realpath(tempfile.mkdtemp(prefix="rs-sync-")).replace("\\", "/")
 os.environ.update(READERS_SCANNER_HOME=TMP, READERS_SCANNER_DRIVER="sane", LANG="en_US.UTF-8", LC_ALL="en_US.UTF-8")
 sys.path.insert(0, os.path.dirname(HERE))
 sys.stdout.reconfigure(encoding="utf-8", line_buffering=True)
+import faulthandler
+faulthandler.enable()          # a crash in Qt says where it happened
 import readers_scanner as rs
 
 WSGIDAV = os.environ.get("WSGIDAV") or shutil.which("wsgidav")
