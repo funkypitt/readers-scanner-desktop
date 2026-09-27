@@ -1,0 +1,27 @@
+# Maintainer: funkypitt <pierregallaz@gmail.com>
+# Arch / Manjaro: cd packaging && makepkg -si
+# REQUIRES NAPS2 to scan (AUR: naps2-bin, or the Flatpak com.naps2.Naps2).
+pkgname=readers-scanner
+pkgver=1.0.0
+pkgrel=1
+pkgdesc="One-click scanning to searchable PDFs, filed in the folders shared with the phone (needs NAPS2)"
+arch=('any')
+url="https://github.com/funkypitt/readers-scanner-desktop"
+license=('MIT')
+depends=('python' 'python-pyqt5' 'python-requests' 'python-pillow' 'python-numpy' 'tesseract' 'poppler')
+optdepends=('naps2-bin: drives the scanner (required to scan)' 'sane: finds the scanner faster')
+source=("$pkgname-$pkgver.tar.gz::https://github.com/funkypitt/readers-scanner-desktop/archive/refs/tags/v$pkgver.tar.gz")
+sha256sums=('SKIP')
+
+package() {
+  cd "$srcdir/readers-scanner-desktop-$pkgver"
+  install -Dm755 readers_scanner.py "$pkgdir/usr/lib/readers-scanner/readers_scanner.py"
+  install -Dm644 packaging/readers-scanner.png "$pkgdir/usr/lib/readers-scanner/readers-scanner.png"
+  install -Dm755 /dev/stdin "$pkgdir/usr/bin/readers-scanner" <<'SH'
+#!/bin/sh
+exec python3 /usr/lib/readers-scanner/readers_scanner.py "$@"
+SH
+  install -Dm644 packaging/readers-scanner.desktop "$pkgdir/usr/share/applications/readers-scanner.desktop"
+  install -Dm644 packaging/readers-scanner.svg "$pkgdir/usr/share/icons/hicolor/scalable/apps/readers-scanner.svg"
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

@@ -1,0 +1,4069 @@
+#!/usr/bin/env python3
+"""Reader's Scanner — documents from a real scanner (flatbed, feeder), read on this computer,
+filed in plain folders as PDFs that can be searched, and shared with the phone through a WebDAV
+folder (kDrive, Nextcloud…). NAPS2 (naps2.com, installed separately) talks to the scanner;
+Tesseract reads the text. One file, PyQt5 + requests + Pillow + numpy. MIT licence."""
+
+import base64
+import json
+import locale
+import os
+import queue
+import re
+import shlex
+import shutil
+import signal
+import subprocess
+import sys
+import threading
+import time
+import unicodedata
+import uuid
+import xml.etree.ElementTree as ET
+import zlib
+from datetime import datetime, date, timedelta
+from urllib.parse import quote, unquote, urljoin, urlparse
+
+import numpy as np
+import requests
+from PIL import Image
+from PyQt5 import QtCore, QtGui, QtWidgets
+
+APP = "readers-scanner"
+VERSION = "1.0.0"
+Image.MAX_IMAGE_PIXELS = 200_000_000      # an A3 page at 600 dpi is not an attack
+
+
+def _app_dirs():
+    """The settings folder and the documents' folder, one place per desktop."""
+    if sys.platform == "win32":
+        base = os.path.join(os.environ.get("APPDATA") or os.path.expanduser("~"), "Readers Scanner")
+        return base, base
+    if sys.platform == "darwin":
+        base = os.path.expanduser("~/Library/Application Support/" + APP)
+        return base, base
+    return (os.path.join(os.environ.get("XDG_CONFIG_HOME", os.path.expanduser("~/.config")), APP),
+            os.path.join(os.environ.get("XDG_DATA_HOME", os.path.expanduser("~/.local/share")), APP))
+
+
+CONFIG_DIR, DATA_DIR = _app_dirs()
+CONFIG_FILE = os.path.join(CONFIG_DIR, "config.json")
+
+
+# ------------------------------------------------------------------------------------------
+# Six languages, the English text as the key: each line gives fr, de, es, pt, ru
+# ------------------------------------------------------------------------------------------
+
+_T = {
+ "today": ("aujourd'hui", "heute", "hoy", "hoje", "сегодня"),
+ "yesterday": ("hier", "gestern", "ayer", "ontem", "вчера"),
+ "cannot reach the server": ("serveur injoignable", "server nicht erreichbar", "no se puede alcanzar el servidor", "não é possível contactar o servidor", "сервер недоступен"),
+ "wrong username or password": ("identifiant ou mot de passe incorrect", "benutzername oder passwort falsch", "usuario o contraseña incorrectos", "utilizador ou palavra-passe errados", "неверное имя пользователя или пароль"),
+ "not a WebDAV folder at this address": ("pas de dossier WebDAV à cette adresse", "kein WebDAV-ordner unter dieser adresse", "no hay carpeta WebDAV en esta dirección", "não há pasta WebDAV neste endereço", "по этому адресу нет папки WebDAV"),
+ "no reading model for %1 — it could not be downloaded": ("pas de modèle de lecture pour %1 — il n'a pas pu être téléchargé", "kein lesemodell für %1 — es konnte nicht geladen werden", "no hay modelo de lectura para %1 — no se pudo descargar", "não há modelo de leitura para %1 — não foi possível descarregá-lo", "нет модели чтения для %1 — не удалось загрузить"),
+ "Tesseract is not installed: the pages are kept without their text": ("Tesseract n'est pas installé : les pages sont gardées sans leur texte", "Tesseract ist nicht installiert: die seiten bleiben ohne text", "Tesseract no está instalado: las páginas se guardan sin su texto", "O Tesseract não está instalado: as páginas ficam sem texto", "Tesseract не установлен: страницы сохраняются без текста"),
+ "the feeder is empty": ("le chargeur est vide", "der einzug ist leer", "el alimentador está vacío", "o alimentador está vazio", "лоток подачи пуст"),
+ "this scanner has no feeder": ("ce scanner n'a pas de chargeur", "dieser scanner hat keinen einzug", "este escáner no tiene alimentador", "este digitalizador não tem alimentador", "у этого сканера нет лотка подачи"),
+ "this scanner cannot scan both sides": ("ce scanner ne scanne pas le recto verso", "dieser scanner kann nicht beidseitig scannen", "este escáner no escanea a doble cara", "este digitalizador não digitaliza frente e verso", "этот сканер не сканирует обе стороны"),
+ "the scanner is not answering — is it switched on?": ("le scanner ne répond pas — est-il allumé ?", "der scanner antwortet nicht — ist er eingeschaltet?", "el escáner no responde — ¿está encendido?", "o digitalizador não responde — está ligado?", "сканер не отвечает — он включён?"),
+ "the scanner is busy": ("le scanner est occupé", "der scanner ist beschäftigt", "el escáner está ocupado", "o digitalizador está ocupado", "сканер занят"),
+ "the scanner's cover is open": ("le capot du scanner est ouvert", "die abdeckung des scanners ist offen", "la tapa del escáner está abierta", "a tampa do digitalizador está aberta", "крышка сканера открыта"),
+ "paper jam in the scanner": ("bourrage papier dans le scanner", "papierstau im scanner", "atasco de papel en el escáner", "papel encravado no digitalizador", "замятие бумаги в сканере"),
+ "the scanner is warming up — try again in a moment": ("le scanner chauffe — réessayez dans un instant", "der scanner wärmt auf — gleich noch einmal versuchen", "el escáner se está calentando — inténtelo en un momento", "o digitalizador está a aquecer — tente daqui a pouco", "сканер прогревается — попробуйте чуть позже"),
+ "the connection to the scanner was interrupted": ("la liaison avec le scanner a été interrompue", "die verbindung zum scanner wurde unterbrochen", "la conexión con el escáner se interrumpió", "a ligação ao digitalizador foi interrompida", "связь со сканером прервалась"),
+ "SANE is not installed (the scanner drivers)": ("SANE n'est pas installé (les pilotes de scanner)", "SANE ist nicht installiert (die scannertreiber)", "SANE no está instalado (los controladores de escáner)", "O SANE não está instalado (os controladores de digitalizador)", "SANE не установлен (драйверы сканера)"),
+ "scan cancelled": ("scan annulé", "scan abgebrochen", "escaneo cancelado", "digitalização cancelada", "сканирование отменено"),
+ "no scanner found — is it switched on?": ("aucun scanner trouvé — est-il allumé ?", "kein scanner gefunden — ist er eingeschaltet?", "no se encontró ningún escáner — ¿está encendido?", "nenhum digitalizador encontrado — está ligado?", "сканер не найден — он включён?"),
+ "NAPS2 is not installed": ("NAPS2 n'est pas installé", "NAPS2 ist nicht installiert", "NAPS2 no está instalado", "O NAPS2 não está instalado", "NAPS2 не установлен"),
+ "the scan did not work": ("le scan n'a pas marché", "der scan hat nicht geklappt", "el escaneo no funcionó", "a digitalização não funcionou", "сканирование не удалось"),
+ "not a Reader's credentials file": ("ce n'est pas un fichier d'identifiants Reader's", "keine Reader's-zugangsdatendatei", "no es un archivo de credenciales Reader's", "não é um ficheiro de credenciais Reader's", "это не файл учётных данных Reader's"),
+ "credentials imported": ("identifiants importés", "zugangsdaten importiert", "credenciales importadas", "credenciais importadas", "учётные данные импортированы"),
+ "this file holds nothing for %1": ("ce fichier ne contient rien pour %1", "diese datei enthält nichts für %1", "este archivo no contiene nada para %1", "este ficheiro não contém nada para %1", "в этом файле нет ничего для %1"),
+ "server and login taken from %1": ("serveur et identifiants repris de %1", "server und anmeldung aus %1 übernommen", "servidor y usuario tomados de %1", "servidor e utilizador retirados de %1", "сервер и логин взяты из %1"),
+ "credentials exported to %1 — the file holds your passwords: keep it private": ("identifiants exportés dans %1 — le fichier contient vos mots de passe : gardez-le privé", "zugangsdaten nach %1 exportiert — die datei enthält ihre passwörter: halten sie sie privat", "credenciales exportadas a %1 — el archivo contiene sus contraseñas: manténgalo privado", "credenciais exportadas para %1 — o ficheiro contém as suas palavras-passe: mantenha-o privado", "учётные данные экспортированы в %1 — файл содержит ваши пароли: храните его в тайне"),
+ "move earlier": ("avancer", "nach vorne", "mover antes", "mover para antes", "переместить раньше"),
+ "move later": ("reculer", "nach hinten", "mover después", "mover para depois", "переместить позже"),
+ "turn": ("tourner", "drehen", "girar", "rodar", "повернуть"),
+ "delete this page": ("supprimer cette page", "diese seite löschen", "eliminar esta página", "eliminar esta página", "удалить эту страницу"),
+ "page": ("page", "seite", "página", "página", "страница"),
+ "discard": ("abandonner", "verwerfen", "descartar", "descartar", "отменить"),
+ "name — optional: without one, the first words read on the page": ("nom — facultatif : sans nom, les premiers mots lus sur la page", "name — freiwillig: ohne namen die ersten gelesenen wörter der seite", "nombre — opcional: sin nombre, las primeras palabras leídas en la página", "nome — opcional: sem nome, as primeiras palavras lidas na página", "название — необязательно: без него — первые слова страницы"),
+ "save": ("enregistrer", "speichern", "guardar", "guardar", "сохранить"),
+ "look": ("aspect", "aussehen", "aspecto", "aspeto", "вид"),
+ "text": ("texte", "text", "texto", "texto", "текст"),
+ "1 blank page left out": ("1 page blanche écartée", "1 leere seite ausgelassen", "1 página en blanco apartada", "1 página em branco posta de parte", "1 пустая страница пропущена"),
+ "%1 blank pages left out": ("%1 pages blanches écartées", "%1 leere seiten ausgelassen", "%1 páginas en blanco apartadas", "%1 páginas em branco postas de parte", "пустых страниц пропущено: %1"),
+ "keep it": ("la garder", "behalten", "conservarla", "mantê-la", "оставить её"),
+ "keep them": ("les garder", "behalten", "conservarlas", "mantê-las", "оставить их"),
+ "1 page": ("1 page", "1 seite", "1 página", "1 página", "1 страница"),
+ "%1 pages": ("%1 pages", "%1 seiten", "%1 páginas", "%1 páginas", "страниц: %1"),
+ "all scans": ("tous les scans", "alle scans", "todos los escaneos", "todas as digitalizações", "все сканы"),
+ "new folder": ("nouveau dossier", "neuer ordner", "nueva carpeta", "nova pasta", "новая папка"),
+ "a click on a folder files the document there · Enter: « %1 »": ("un clic sur un dossier y range le document · Entrée : « %1 »", "ein klick auf einen ordner legt das dokument dort ab · Eingabe: « %1 »", "un clic en una carpeta guarda allí el documento · Intro: « %1 »", "um clique numa pasta guarda lá o documento · Enter: « %1 »", "щелчок по папке кладёт документ в неё · Enter: « %1 »"),
+ "as scanned": ("tel que scanné", "wie gescannt", "tal como se escaneó", "como digitalizado", "как отсканировано"),
+ "clean": ("net", "sauber", "limpio", "limpo", "чисто"),
+ "grey": ("gris", "grau", "gris", "cinzento", "серый"),
+ "b & w": ("n & b", "s/w", "b/n", "p/b", "ч/б"),
+ "automatic": ("automatique", "automatisch", "automático", "automático", "автоматически"),
+ "glass": ("vitre", "glas", "cristal", "vidro", "стекло"),
+ "feeder": ("chargeur", "einzug", "alimentador", "alimentador", "лоток подачи"),
+ "both sides": ("recto verso", "beidseitig", "doble cara", "frente e verso", "обе стороны"),
+ "Tesseract best": ("Tesseract meilleur", "Tesseract bestes", "Tesseract mejor", "Tesseract melhor", "Tesseract лучший"),
+ "A WebDAV folder shares the scans with your phone and your other computers: the same server, folder and login as in Reader's Scanner on Android. kDrive: server https://ID.connect.kdrive.infomaniak.com (the ID is the number in the kDrive web address), your Infomaniak login, and an application password if two-factor authentication is on. Nextcloud and any WebDAV server work the same way.": (
+    "Un dossier WebDAV partage les scans avec votre téléphone et vos autres ordinateurs : le même serveur, le même dossier et les mêmes identifiants que dans Reader's Scanner sur Android. kDrive : serveur https://ID.connect.kdrive.infomaniak.com (l'ID est le nombre dans l'adresse web de kDrive), votre identifiant Infomaniak et un mot de passe d'application si la double authentification est active. Nextcloud et tout serveur WebDAV fonctionnent de la même façon.",
+    "Ein WebDAV-ordner teilt die scans mit ihrem telefon und ihren anderen computern: derselbe server, ordner und login wie in Reader's Scanner auf Android. kDrive: server https://ID.connect.kdrive.infomaniak.com (die ID ist die zahl in der kDrive-webadresse), Ihr Infomaniak-login und bei zwei-faktor-anmeldung ein app-passwort. Nextcloud und jeder WebDAV-server funktionieren genauso.",
+    "Una carpeta WebDAV comparte los escaneos con su teléfono y sus otros ordenadores: el mismo servidor, carpeta y usuario que en Reader's Scanner en Android. kDrive: servidor https://ID.connect.kdrive.infomaniak.com (el ID es el número de la dirección web de kDrive), su usuario de Infomaniak y una contraseña de aplicación si tiene la verificación en dos pasos. Nextcloud y cualquier servidor WebDAV funcionan igual.",
+    "Uma pasta WebDAV partilha as digitalizações com o seu telemóvel e os seus outros computadores: o mesmo servidor, pasta e utilizador que no Reader's Scanner no Android. kDrive: servidor https://ID.connect.kdrive.infomaniak.com (o ID é o número no endereço web do kDrive), o seu utilizador Infomaniak e uma palavra-passe de aplicação se tiver a verificação em dois passos. O Nextcloud e qualquer servidor WebDAV funcionam da mesma forma.",
+    "Папка WebDAV делит сканы с телефоном и другими компьютерами: тот же сервер, папка и логин, что в Reader's Scanner на Android. kDrive: сервер https://ID.connect.kdrive.infomaniak.com (ID — число в веб-адресе kDrive), ваш логин Infomaniak и пароль приложения при двухфакторной аутентификации. Nextcloud и любой WebDAV-сервер работают так же."),
+ "server": ("serveur", "server", "servidor", "servidor", "сервер"),
+ "username": ("identifiant", "benutzername", "usuario", "utilizador", "имя пользователя"),
+ "password": ("mot de passe", "passwort", "contraseña", "palavra-passe", "пароль"),
+ "folder on the server": ("dossier sur le serveur", "ordner auf dem server", "carpeta en el servidor", "pasta no servidor", "папка на сервере"),
+ "import credentials…": ("importer les identifiants…", "zugangsdaten importieren…", "importar credenciales…", "importar credenciais…", "импортировать учётные данные…"),
+ "export credentials…": ("exporter les identifiants…", "zugangsdaten exportieren…", "exportar credenciales…", "exportar credenciais…", "экспортировать учётные данные…"),
+ "look again": ("chercher à nouveau", "noch einmal suchen", "buscar de nuevo", "procurar de novo", "искать снова"),
+ "scanner": ("scanner", "scanner", "escáner", "digitalizador", "сканер"),
+ "NAPS2 %1 — it talks to the scanner": ("NAPS2 %1 — c'est lui qui parle au scanner", "NAPS2 %1 — es spricht mit dem scanner", "NAPS2 %1 — es el que habla con el escáner", "NAPS2 %1 — é ele que fala com o digitalizador", "NAPS2 %1 — он общается со сканером"),
+ "NAPS2 is not installed: it is required, it talks to the scanner.": ("NAPS2 n'est pas installé : il est indispensable, c'est lui qui parle au scanner.", "NAPS2 ist nicht installiert: es ist erforderlich, es spricht mit dem scanner.", "NAPS2 no está instalado: es imprescindible, es el que habla con el escáner.", "O NAPS2 não está instalado: é indispensável, é ele que fala com o digitalizador.", "NAPS2 не установлен: он необходим, он общается со сканером."),
+ "automatic (%1 here)": ("automatique (%1 ici)", "automatisch (hier %1)", "automático (%1 aquí)", "automático (%1 aqui)", "автоматически (здесь %1)"),
+ "A series (A4)": ("série A (A4)", "A-reihe (A4)", "serie A (A4)", "série A (A4)", "серия A (A4)"),
+ "page format": ("format des pages", "seitenformat", "formato de página", "formato das páginas", "формат страниц"),
+ "reading": ("lecture", "lesen", "lectura", "leitura", "чтение"),
+ "font": ("police", "schrift", "fuente", "tipo de letra", "шрифт"),
+ "cancel": ("annuler", "abbrechen", "cancelar", "cancelar", "отмена"),
+ "Pierre Gallaz · developed with Claude Code": ("Pierre Gallaz · développé avec Claude Code", "Pierre Gallaz · entwickelt mit Claude Code", "Pierre Gallaz · desarrollado con Claude Code", "Pierre Gallaz · desenvolvido com Claude Code", "Pierre Gallaz · разработано с Claude Code"),
+ "scanning by NAPS2, reading by Tesseract": ("scan par NAPS2, lecture par Tesseract", "scannen mit NAPS2, lesen mit Tesseract", "escaneo por NAPS2, lectura por Tesseract", "digitalização pelo NAPS2, leitura pelo Tesseract", "сканирование — NAPS2, чтение — Tesseract"),
+ "none found yet": ("aucun trouvé pour l'instant", "noch keiner gefunden", "ninguno encontrado todavía", "nenhum encontrado ainda", "пока не найден"),
+ "none found — is the scanner switched on?": ("aucun trouvé — le scanner est-il allumé ?", "keiner gefunden — ist der scanner eingeschaltet?", "ninguno encontrado — ¿está encendido el escáner?", "nenhum encontrado — o digitalizador está ligado?", "не найден — сканер включён?"),
+ "looking…": ("recherche…", "suche…", "buscando…", "a procurar…", "поиск…"),
+ "%1: downloading the best model… %2 %": ("%1 : téléchargement du meilleur modèle… %2 %", "%1: bestes modell wird geladen… %2 %", "%1: descargando el mejor modelo… %2 %", "%1: a descarregar o melhor modelo… %2 %", "%1: загрузка лучшей модели… %2 %"),
+ "Reader's credentials (*.json)": ("Identifiants Reader's (*.json)", "Reader's-zugangsdaten (*.json)", "Credenciales Reader's (*.json)", "Credenciais Reader's (*.json)", "Учётные данные Reader's (*.json)"),
+ "find": ("chercher", "suchen", "buscar", "procurar", "найти"),
+ "the most accurate models (fetched once per language, 4 to 15 MB)": ("les modèles les plus exacts (téléchargés une fois par langue, 4 à 15 Mo)", "die genauesten modelle (einmal pro sprache geladen, 4 bis 15 MB)", "los modelos más precisos (descargados una vez por idioma, 4 a 15 MB)", "os modelos mais exatos (descarregados uma vez por língua, 4 a 15 MB)", "самые точные модели (загружаются один раз для языка, 4–15 МБ)"),
+ "%1: the best model is here": ("%1 : le meilleur modèle est là", "%1: das beste modell ist da", "%1: el mejor modelo está aquí", "%1: o melhor modelo está cá", "%1: лучшая модель на месте"),
+ "%1: the system's model for now": ("%1 : le modèle du système pour l'instant", "%1: vorerst das modell des systems", "%1: el modelo del sistema por ahora", "%1: o modelo do sistema por agora", "%1: пока модель системы"),
+ "%1: its model will be fetched at the first reading": ("%1 : son modèle sera téléchargé à la première lecture", "%1: sein modell wird beim ersten lesen geladen", "%1: su modelo se descargará en la primera lectura", "%1: o modelo será descarregado na primeira leitura", "%1: модель загрузится при первом чтении"),
+ "find in names and text": ("chercher dans les noms et le texte", "in namen und text suchen", "buscar en nombres y texto", "procurar nos nomes e no texto", "поиск по названиям и тексту"),
+ "scan": ("scanner", "scannen", "escanear", "digitalizar", "сканировать"),
+ "settings (Ctrl+,)": ("réglages (Ctrl+,)", "einstellungen (Strg+,)", "ajustes (Ctrl+,)", "definições (Ctrl+,)", "настройки (Ctrl+,)"),
+ "open the PDF": ("ouvrir le PDF", "PDF öffnen", "abrir el PDF", "abrir o PDF", "открыть PDF"),
+ "save a copy…": ("enregistrer une copie…", "kopie speichern…", "guardar una copia…", "guardar uma cópia…", "сохранить копию…"),
+ "copy the text": ("copier le texte", "text kopieren", "copiar el texto", "copiar o texto", "копировать текст"),
+ "from": ("depuis", "von", "desde", "de", "источник"),
+ "automatic: the feeder when it holds paper, the glass otherwise": ("automatique : le chargeur s'il contient du papier, la vitre sinon", "automatisch: der einzug, wenn papier darin liegt, sonst das glas", "automático: el alimentador si tiene papel, el cristal si no", "automático: o alimentador se tiver papel, o vidro se não", "автоматически: лоток, если в нём бумага, иначе стекло"),
+ "as scanned, or cleaned: white paper, grey, black and white": ("tel que scanné, ou nettoyé : papier blanc, gris, noir et blanc", "wie gescannt oder gereinigt: weisses papier, grau, schwarz-weiss", "tal como se escaneó, o limpiado: papel blanco, gris, blanco y negro", "como digitalizado, ou limpo: papel branco, cinzento, preto e branco", "как отсканировано или очищено: белая бумага, серый, чёрно-белый"),
+ "the language the text is read in": ("la langue dans laquelle le texte est lu", "die sprache, in der der text gelesen wird", "el idioma en que se lee el texto", "a língua em que o texto é lido", "язык, на котором читается текст"),
+ "reading the text %1": ("lecture du texte %1", "text wird gelesen %1", "leyendo el texto %1", "a ler o texto %1", "чтение текста %1"),
+ "reading the text…": ("lecture du texte…", "text wird gelesen…", "leyendo el texto…", "a ler o texto…", "чтение текста…"),
+ "text to be read": ("texte à lire", "text wird noch gelesen", "texto por leer", "texto por ler", "текст ещё не прочитан"),
+ "text could not be read": ("le texte n'a pas pu être lu", "text konnte nicht gelesen werden", "no se pudo leer el texto", "não foi possível ler o texto", "текст не удалось прочитать"),
+ "downloading… %1 %": ("téléchargement… %1 %", "wird geladen… %1 %", "descargando… %1 %", "a descarregar… %1 %", "загрузка… %1 %"),
+ "scan not filed yet": ("scan pas encore rangé", "scan noch nicht abgelegt", "escaneo aún sin guardar", "digitalização ainda por arrumar", "скан ещё не разложен"),
+ "nothing found": ("rien trouvé", "nichts gefunden", "no se encontró nada", "nada encontrado", "ничего не найдено"),
+ "no scans here yet": ("pas encore de scan ici", "hier noch keine scans", "todavía no hay escaneos aquí", "ainda não há digitalizações aqui", "здесь пока нет сканов"),
+ "rename…": ("renommer…", "umbenennen…", "cambiar el nombre…", "mudar o nome…", "переименовать…"),
+ "delete the folder": ("supprimer le dossier", "ordner löschen", "eliminar la carpeta", "eliminar a pasta", "удалить папку"),
+ "from files…": ("depuis des fichiers…", "aus dateien…", "desde archivos…", "de ficheiros…", "из файлов…"),
+ "name of the new folder": ("nom du nouveau dossier", "name des neuen ordners", "nombre de la nueva carpeta", "nome da nova pasta", "название новой папки"),
+ "new name of the folder": ("nouveau nom du dossier", "neuer name des ordners", "nuevo nombre de la carpeta", "novo nome da pasta", "новое название папки"),
+ "Delete the folder “%1”? Its scans stay, in all scans.": ("Supprimer le dossier « %1 » ? Ses scans restent, dans tous les scans.", "Den ordner „%1“ löschen? Seine scans bleiben, in alle scans.", "¿Eliminar la carpeta «%1»? Sus escaneos se quedan, en todos los escaneos.", "Eliminar a pasta «%1»? As digitalizações ficam, em todas as digitalizações.", "Удалить папку «%1»? Её сканы останутся во «всех сканах»."),
+ "put the pages on the scanner, press « scan »": ("posez les pages sur le scanner, appuyez sur « scanner »", "seiten auf den scanner legen, « scannen » drücken", "ponga las páginas en el escáner, pulse « escanear »", "ponha as páginas no digitalizador, carregue em « digitalizar »", "положите страницы в сканер и нажмите « сканировать »"),
+ "In the feeder or on the glass: the scanner takes what it finds. The text is read on this computer, and the document becomes a PDF you can search.": ("Dans le chargeur ou sur la vitre : le scanner prend ce qu'il trouve. Le texte est lu sur cet ordinateur, et le document devient un PDF dans lequel on peut chercher.", "Im einzug oder auf dem glas: der scanner nimmt, was er findet. Der text wird auf diesem computer gelesen, und das dokument wird ein durchsuchbares PDF.", "En el alimentador o sobre el cristal: el escáner toma lo que encuentra. El texto se lee en este ordenador, y el documento se convierte en un PDF en el que se puede buscar.", "No alimentador ou no vidro: o digitalizador pega no que encontra. O texto é lido neste computador, e o documento torna-se um PDF pesquisável.", "В лотке или на стекле: сканер берёт то, что найдёт. Текст читается на этом компьютере, документ становится PDF с поиском."),
+ "scan, or choose a document": ("scannez, ou choisissez un document", "scannen oder ein dokument wählen", "escanee o elija un documento", "digitalize ou escolha um documento", "сканируйте или выберите документ"),
+ "Reader's Scanner needs NAPS2": ("Reader's Scanner a besoin de NAPS2", "Reader's Scanner braucht NAPS2", "Reader's Scanner necesita NAPS2", "O Reader's Scanner precisa do NAPS2", "Reader's Scanner нужен NAPS2"),
+ "NAPS2 is the free program that talks to the scanner. It is installed separately, from naps2.com. Once it is there, « look again »; pictures and PDFs can be brought in from files meanwhile.": ("NAPS2 est le logiciel libre qui parle au scanner. Il s'installe à part, depuis naps2.com. Une fois installé, « chercher à nouveau » ; en attendant, des images et des PDF peuvent être apportés depuis des fichiers.", "NAPS2 ist das freie programm, das mit dem scanner spricht. Es wird separat installiert, von naps2.com. Danach « noch einmal suchen »; bis dahin lassen sich bilder und PDFs aus dateien holen.", "NAPS2 es el programa libre que habla con el escáner. Se instala aparte, desde naps2.com. Una vez instalado, « buscar de nuevo »; mientras tanto se pueden traer imágenes y PDF desde archivos.", "O NAPS2 é o programa livre que fala com o digitalizador. Instala-se à parte, a partir de naps2.com. Depois, « procurar de novo »; entretanto, imagens e PDFs podem vir de ficheiros.", "NAPS2 — свободная программа, которая общается со сканером. Она устанавливается отдельно, с naps2.com. После установки — « искать снова »; пока что изображения и PDF можно взять из файлов."),
+ "get NAPS2": ("obtenir NAPS2", "NAPS2 holen", "obtener NAPS2", "obter o NAPS2", "получить NAPS2"),
+ "scanned elsewhere": ("scanné ailleurs", "anderswo gescannt", "escaneado en otro lugar", "digitalizado noutro lado", "отсканировано в другом месте"),
+ "pages": ("pages", "seiten", "páginas", "páginas", "страницы"),
+ "No text was found on these pages.": ("Aucun texte n'a été trouvé sur ces pages.", "Auf diesen seiten wurde kein text gefunden.", "No se encontró texto en estas páginas.", "Não foi encontrado texto nestas páginas.", "На этих страницах текст не найден."),
+ "The text has not been read yet.": ("Le texte n'a pas encore été lu.", "Der text wurde noch nicht gelesen.", "El texto todavía no se ha leído.", "O texto ainda não foi lido.", "Текст ещё не прочитан."),
+ "its PDF needs the WebDAV folder": ("son PDF demande le dossier WebDAV", "sein PDF braucht den WebDAV-ordner", "su PDF necesita la carpeta WebDAV", "o PDF precisa da pasta WebDAV", "для PDF нужна папка WebDAV"),
+ "the PDF is not on the server (any more)": ("le PDF n'est pas (plus) sur le serveur", "das PDF ist nicht (mehr) auf dem server", "el PDF no está (ya) en el servidor", "o PDF não está (já) no servidor", "PDF нет на сервере"),
+ "save the copies in…": ("enregistrer les copies dans…", "kopien speichern in…", "guardar las copias en…", "guardar as cópias em…", "сохранить копии в…"),
+ "save the pages as pictures in…": ("enregistrer les pages en images dans…", "seiten als bilder speichern in…", "guardar las páginas como imágenes en…", "guardar as páginas como imagens em…", "сохранить страницы как изображения в…"),
+ "text copied": ("texte copié", "text kopiert", "texto copiado", "texto copiado", "текст скопирован"),
+ "save the pages as pictures…": ("enregistrer les pages en images…", "seiten als bilder speichern…", "guardar las páginas como imágenes…", "guardar as páginas como imagens…", "сохранить страницы как изображения…"),
+ "move to": ("déplacer vers", "verschieben nach", "mover a", "mover para", "переместить в"),
+ "no folder (all scans only)": ("aucun dossier (tous les scans seulement)", "kein ordner (nur alle scans)", "sin carpeta (solo todos los escaneos)", "sem pasta (só todas as digitalizações)", "без папки (только «все сканы»)"),
+ "edit the pages": ("modifier les pages", "seiten bearbeiten", "editar las páginas", "editar as páginas", "изменить страницы"),
+ "add pages from the scanner": ("ajouter des pages depuis le scanner", "seiten vom scanner hinzufügen", "añadir páginas desde el escáner", "juntar páginas do digitalizador", "добавить страницы со сканера"),
+ "read the text again in": ("relire le texte en", "text neu lesen auf", "volver a leer el texto en", "ler o texto de novo em", "прочитать текст заново на языке"),
+ "delete": ("supprimer", "löschen", "eliminar", "eliminar", "удалить"),
+ "sync now": ("synchroniser", "jetzt synchronisieren", "sincronizar ahora", "sincronizar agora", "синхронизировать"),
+ "black on white": ("noir sur blanc", "schwarz auf weiss", "negro sobre blanco", "preto sobre branco", "чёрное на белом"),
+ "white on black": ("blanc sur noir", "weiss auf schwarz", "blanco sobre negro", "branco sobre preto", "белое на чёрном"),
+ "settings": ("réglages", "einstellungen", "ajustes", "definições", "настройки"),
+ "name (empty: the first words of the text)": ("nom (vide : les premiers mots du texte)", "name (leer: die ersten wörter des textes)", "nombre (vacío: las primeras palabras del texto)", "nome (vazio: as primeiras palavras do texto)", "название (пусто — первые слова текста)"),
+ "Delete “%1”?": ("Supprimer « %1 » ?", "„%1“ löschen?", "¿Eliminar «%1»?", "Eliminar «%1»?", "Удалить «%1»?"),
+ "Delete these %1 documents?": ("Supprimer ces %1 documents ?", "Diese %1 dokumente löschen?", "¿Eliminar estos %1 documentos?", "Eliminar estes %1 documentos?", "Удалить эти документы (%1)?"),
+ "scanning…": ("scan en cours…", "scannt…", "escaneando…", "a digitalizar…", "сканирование…"),
+ "page %1": ("page %1", "seite %1", "página %1", "página %1", "страница %1"),
+ "setting the pages upright…": ("remise à l'endroit des pages…", "seiten werden aufgerichtet…", "poniendo las páginas derechas…", "a endireitar as páginas…", "поворот страниц…"),
+ "looking for the scanner…": ("recherche du scanner…", "scanner wird gesucht…", "buscando el escáner…", "a procurar o digitalizador…", "поиск сканера…"),
+ "from the feeder": ("depuis le chargeur", "aus dem einzug", "desde el alimentador", "do alimentador", "из лотка подачи"),
+ "from the glass": ("depuis la vitre", "vom glas", "desde el cristal", "do vidro", "со стекла"),
+ "Put the pages in the feeder, or choose « glass ».": ("Mettez les pages dans le chargeur, ou choisissez « vitre ».", "Seiten in den einzug legen oder « glas » wählen.", "Ponga las páginas en el alimentador, o elija « cristal ».", "Ponha as páginas no alimentador, ou escolha « vidro ».", "Положите страницы в лоток или выберите « стекло »."),
+ "Switch the scanner on and check its cable; then scan again.": ("Allumez le scanner et vérifiez son câble ; puis scannez à nouveau.", "Scanner einschalten und kabel prüfen; dann noch einmal scannen.", "Encienda el escáner y revise su cable; luego escanee de nuevo.", "Ligue o digitalizador e verifique o cabo; depois digitalize de novo.", "Включите сканер и проверьте кабель; затем сканируйте снова."),
+ "scan again": ("scanner à nouveau", "noch einmal scannen", "escanear de nuevo", "digitalizar de novo", "сканировать снова"),
+ "back to the pages": ("retour aux pages", "zurück zu den seiten", "volver a las páginas", "voltar às páginas", "назад к страницам"),
+ "Discard this page?": ("Abandonner cette page ?", "Diese seite verwerfen?", "¿Descartar esta página?", "Descartar esta página?", "Отменить эту страницу?"),
+ "Discard these %1 pages?": ("Abandonner ces %1 pages ?", "Diese %1 seiten verwerfen?", "¿Descartar estas %1 páginas?", "Descartar estas %1 páginas?", "Отменить эти страницы (%1)?"),
+ "Pictures and PDFs": ("Images et PDF", "Bilder und PDFs", "Imágenes y PDF", "Imagens e PDF", "Изображения и PDF"),
+ "bringing the pages in…": ("import des pages…", "seiten werden geholt…", "trayendo las páginas…", "a trazer as páginas…", "импорт страниц…"),
+ "poppler-utils is needed to read a PDF": ("poppler-utils est nécessaire pour lire un PDF", "poppler-utils wird gebraucht, um ein PDF zu lesen", "se necesita poppler-utils para leer un PDF", "é preciso o poppler-utils para ler um PDF", "для чтения PDF нужен poppler-utils"),
+ "nothing could be read in these files": ("rien n'a pu être lu dans ces fichiers", "in diesen dateien war nichts lesbar", "no se pudo leer nada en estos archivos", "não foi possível ler nada nestes ficheiros", "в этих файлах ничего не удалось прочитать"),
+ "synced %1": ("synchronisé %1", "synchronisiert %1", "sincronizado %1", "sincronizado %1", "синхр. %1"),
+ "no scanner found yet": ("pas encore de scanner", "noch kein scanner gefunden", "aún sin escáner", "ainda sem digitalizador", "сканер пока не найден"),
+ "syncing…": ("synchronisation…", "synchronisiert…", "sincronizando…", "a sincronizar…", "синхронизация…"),
+ "on this computer only": ("sur cet ordinateur seulement", "nur auf diesem computer", "solo en este ordenador", "só neste computador", "только на этом компьютере"),
+ "Ctrl+, to set up a WebDAV folder shared with the phone": ("Ctrl+, pour configurer un dossier WebDAV partagé avec le téléphone", "Strg+, um einen mit dem telefon geteilten WebDAV-ordner einzurichten", "Ctrl+, para configurar una carpeta WebDAV compartida con el teléfono", "Ctrl+, para configurar uma pasta WebDAV partilhada com o telemóvel", "Ctrl+, — настроить папку WebDAV, общую с телефоном"),
+}
+
+_TR = {lang: {k: v[i] for k, v in _T.items()} for i, lang in enumerate(("fr", "de", "es", "pt", "ru"))}
+
+
+def _lang():
+    for var in ("LC_ALL", "LC_MESSAGES", "LANG"):
+        v = os.environ.get(var)
+        if v:
+            return v[:2].lower()
+    try:
+        return (locale.getlocale()[0] or "en")[:2].lower()
+    except (ValueError, TypeError):
+        return "en"
+
+
+_LANG = _lang()
+
+def _(key, *args):
+    s = _TR.get(_LANG, {}).get(key, key)
+    for i, a in enumerate(args):
+        s = s.replace("%" + str(i + 1), str(a))
+    return s
+
+
+# ------------------------------------------------------------------------------------------
+# Names: the phone's rules, so both sides call a document and its file alike
+# ------------------------------------------------------------------------------------------
+
+_BAD = re.compile(r'[\\/:*?"<>|\x00-\x1f\x7f]')
+_WORD = re.compile(r"[^\W_][^\W_'’.\-]*(?:['’.\-]+[^\W_]+)*")
+
+
+def folder_name_of(name):
+    """A folder name the server and the phone both accept; None when nothing is left."""
+    n = re.sub(r"\s+", " ", _BAD.sub(" ", name)).strip().strip(".").strip()
+    return n[:60] or None
+
+
+def stamp_of(created_ms):
+    return datetime.fromtimestamp(created_ms / 1000).strftime("%Y-%m-%d %Hh%M")
+
+
+def title_of(doc):
+    """"2026-09-24 11h32" followed by the name, when there is one."""
+    return stamp_of(doc["created"]) + (" " + doc["name"] if doc.get("name") else "")
+
+
+def file_name_of(doc, ext="pdf"):
+    return re.sub(r"\s+", " ", _BAD.sub(" ", title_of(doc))).strip()[:120] + "." + ext
+
+
+def _is_word(t):
+    letters = sum(c.isalpha() for c in t)
+    digits = sum(c.isdigit() for c in t)
+    return (letters >= 2 and letters * 10 >= len(t) * 6) or (digits >= 2 and letters == 0 and len(t) <= 10)
+
+
+def first_words(text, most=5, most_chars=40):
+    """The name a document gets from its text when the user gave none: the first few real
+    words of the page, whole lines until there are three, debris lines skipped."""
+    words, full = [], False
+    for line in text.splitlines():
+        tokens = [m.group(0).strip(".-'’") for m in _WORD.finditer(line)]
+        tokens = [t for t in tokens if t]
+        good = [t for t in tokens if _is_word(t)]
+        if not good or len(good) * 2 < len(tokens):
+            if words:
+                break
+            continue
+        for t in good:
+            if len(words) >= most or len(" ".join(words)) + len(t) + 1 > most_chars:
+                full = True
+                break
+            words.append(t)
+        if full or len(words) >= 3:
+            break
+    while len(words) > 1 and len(words[-1]) <= 3 and words[-1].islower():
+        words.pop()
+    return " ".join(words) or None
+
+
+def fold(s):
+    """Lower case, accents off: how search compares."""
+    return "".join(c for c in unicodedata.normalize("NFD", s) if unicodedata.category(c) != "Mn").lower()
+
+
+def reflow(text):
+    """The text as read, the paper's line breaks taken out: a line as long as the page is wide
+    goes on with the next one; short lines stay (addresses, amounts); blank lines still part
+    paragraphs. The phone's rule."""
+    widest = max((len(l.strip()) for l in text.splitlines()), default=0)
+    out = []
+    for para in re.split(r"\n\s*\n", text):
+        lines = [l.strip() for l in para.splitlines() if l.strip()]
+        buf = ""
+        for i, line in enumerate(lines):
+            buf += line
+            if i == len(lines) - 1:
+                break
+            nxt = lines[i + 1]
+            long = len(line) >= widest * 0.72
+            full = long and (not line.endswith((":", ".")) or nxt[:1].islower())
+            if full and line.endswith("-") and nxt[:1].islower():
+                buf = buf[:-1]
+            elif full:
+                buf += " "
+            else:
+                buf += "\n"
+        out.append(buf)
+    return "\n\n".join(out).strip()
+
+
+def new_id():
+    return uuid.uuid4().hex[:12]
+
+
+def now_ms():
+    return int(time.time() * 1000)
+
+
+def when_label(millis):
+    d = datetime.fromtimestamp(millis / 1000)
+    today = date.today()
+    if d.date() == today:
+        return _("today") + " " + d.strftime("%H:%M")
+    if d.date() == today - timedelta(days=1):
+        return _("yesterday") + " " + d.strftime("%H:%M")
+    return f"{d.day} {d.strftime('%b' if d.year == today.year else '%b %Y')}".lower() + " " + d.strftime("%H:%M")
+
+
+# ------------------------------------------------------------------------------------------
+# Documents on disk. A document scanned here keeps its pages (the scan as it came, and the
+# page as shown); one from another device has only its description and text, and its PDF once
+# it has been opened.
+#
+#   index.json                 documents, folders, folders deleted here
+#   docs/<id>/<page>.src.jpg   the scan            docs/<id>/<page>.jpg   the page as shown
+#   docs/<id>/doc.pdf          the searchable PDF  docs/<id>/text.json    the text of each page
+# ------------------------------------------------------------------------------------------
+
+LOOKS = ("original", "clean", "grey", "bw")
+PENDING, DONE, FAILED = "PENDING", "DONE", "FAILED"
+
+
+class Store:
+    """Thread-safe: reading the text, sync and downloads run off the UI thread. `on_change`
+    is called after every change."""
+
+    def __init__(self, root):
+        self.root = root
+        self.docs_dir = os.path.join(root, "docs")
+        os.makedirs(self.docs_dir, exist_ok=True)
+        self.index_file = os.path.join(root, "index.json")
+        self.lock = threading.RLock()
+        self.on_change = None
+        try:
+            with open(self.index_file, encoding="utf-8") as f:
+                data = json.load(f)
+        except (OSError, ValueError):
+            data = {}
+        self.docs = {d["id"]: d for d in data.get("docs", [])}
+        self.folders = data.get("folders", [])          # {"name", "onServer"}
+        self.gone_folders = data.get("goneFolders", [])
+        self._texts = {}
+
+    def _save(self):
+        tmp = self.index_file + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump({"docs": list(self.docs.values()), "folders": self.folders, "goneFolders": self.gone_folders}, f, indent=1, ensure_ascii=False)
+        os.replace(tmp, self.index_file)
+        if self.on_change:
+            self.on_change()
+
+    # ---- files ------------------------------------------------------------------------
+
+    def dir(self, doc_id):
+        return os.path.join(self.docs_dir, doc_id)
+
+    def src_file(self, doc_id, page_id):
+        return os.path.join(self.dir(doc_id), page_id + ".src.jpg")
+
+    def page_file(self, doc_id, page_id):
+        return os.path.join(self.dir(doc_id), page_id + ".jpg")
+
+    def pdf_file(self, doc_id):
+        return os.path.join(self.dir(doc_id), "doc.pdf")
+
+    def has_pdf(self, doc_id):
+        p = self.pdf_file(doc_id)
+        return os.path.exists(p) and os.path.getsize(p) > 0
+
+    def text(self, doc_id):
+        """The text read on each page (an empty list until it has been read)."""
+        with self.lock:
+            if doc_id not in self._texts:
+                try:
+                    with open(os.path.join(self.dir(doc_id), "text.json"), encoding="utf-8") as f:
+                        self._texts[doc_id] = json.load(f)
+                except (OSError, ValueError):
+                    return []
+            return list(self._texts[doc_id])
+
+    def _set_text(self, doc_id, pages):
+        os.makedirs(self.dir(doc_id), exist_ok=True)
+        path = os.path.join(self.dir(doc_id), "text.json")
+        with open(path + ".tmp", "w", encoding="utf-8") as f:
+            json.dump(pages, f, ensure_ascii=False)
+        os.replace(path + ".tmp", path)
+        self._texts[doc_id] = list(pages)
+
+    # ---- reading ----------------------------------------------------------------------
+
+    def get(self, doc_id):
+        with self.lock:
+            d = self.docs.get(doc_id)
+            return json.loads(json.dumps(d)) if d else None
+
+    def all(self, folder=None):
+        """Newest first; folder None = every document."""
+        with self.lock:
+            docs = [json.loads(json.dumps(d)) for d in self.docs.values() if folder is None or d.get("folder", "") == folder]
+        return sorted(docs, key=lambda d: -d["created"])
+
+    def count(self, folder=None):
+        with self.lock:
+            return sum(1 for d in self.docs.values() if folder is None or d.get("folder", "") == folder)
+
+    @staticmethod
+    def page_count(doc):
+        return doc.get("pageCount", 0) if doc.get("remote") else len(doc.get("pages", []))
+
+    def pending(self):
+        with self.lock:
+            return [d["id"] for d in sorted(self.docs.values(), key=lambda d: d["created"]) if d.get("ocr") == PENDING and not d.get("remote")]
+
+    def search(self, query):
+        """Names and text, without case or accents; every word asked must be there, in any
+        order: (document, snippet or None)."""
+        q = fold(query.strip())
+        words = q.split()
+        if not words:
+            return []
+        out = []
+        for d in self.all():
+            text = "\n".join(self.text(d["id"]))
+            folded = fold(text)
+            title = fold(title_of(d))
+            if not all(w in folded or w in title for w in words):
+                continue
+            at = folded.find(q)
+            n = len(q)
+            if at < 0:
+                at, n = min(((folded.find(w), len(w)) for w in words if w in folded), default=(-1, 0))
+            if at >= 0 and len(folded) == len(text):
+                a, b = max(0, at - 40), min(len(text), at + n + 60)
+                out.append((d, ("…" if a else "") + re.sub(r"\s+", " ", text[a:b]).strip() + ("…" if b < len(text) else "")))
+            else:
+                out.append((d, None))
+        return out
+
+    # ---- folders ----------------------------------------------------------------------
+
+    def folder_names(self):
+        with self.lock:
+            return sorted((f["name"] for f in self.folders), key=str.lower)
+
+    def folder_by_name(self, name):
+        with self.lock:
+            return next((f["name"] for f in self.folders if f["name"].lower() == name.lower()), None)
+
+    def add_folder(self, name):
+        """The name kept (made safe for a file system); the existing one if taken; None if empty."""
+        with self.lock:
+            n = folder_name_of(name)
+            if not n:
+                return None
+            have = self.folder_by_name(n)
+            if have:
+                return have
+            self.folders.append({"name": n, "onServer": False})
+            self.gone_folders = [g for g in self.gone_folders if g != n]
+            self._save()
+            return n
+
+    def rename_folder(self, old, name):
+        with self.lock:
+            n = folder_name_of(name)
+            if not n or n == old or any(f["name"].lower() == n.lower() and f["name"] != old for f in self.folders):
+                return None
+            if any(f["name"] == old and f.get("onServer") for f in self.folders):
+                self.gone_folders.append(old)
+            self.folders = [f for f in self.folders if f["name"] != old] + [{"name": n, "onServer": False}]
+            self.gone_folders = [g for g in self.gone_folders if g != n]
+            now = now_ms()
+            for d in self.docs.values():
+                if d.get("folder", "") == old:
+                    d.update(folder=n, modified=now)
+            self._save()
+            return n
+
+    def delete_folder(self, name):
+        """The folder goes; its documents stay, in « all scans »."""
+        with self.lock:
+            if any(f["name"] == name and f.get("onServer") for f in self.folders):
+                self.gone_folders.append(name)
+            self.folders = [f for f in self.folders if f["name"] != name]
+            now = now_ms()
+            for d in self.docs.values():
+                if d.get("folder", "") == name:
+                    d.update(folder="", modified=now)
+            self._save()
+
+    # folder side of the sync
+    def folder_on_server(self, name):
+        with self.lock:
+            have = self.folder_by_name(name)
+            if have is None:
+                self.folders.append({"name": name, "onServer": True})
+                have = name
+            else:
+                for f in self.folders:
+                    if f["name"] == have:
+                        f["onServer"] = True
+            self._save()
+            return have
+
+    def folder_gone_there(self, name):
+        with self.lock:
+            self.folders = [f for f in self.folders if f["name"] != name]
+            for d in self.docs.values():
+                if d.get("folder", "") == name:
+                    d["folder"] = ""
+            self._save()
+
+    def folder_removed_there(self, name):
+        with self.lock:
+            self.gone_folders = [g for g in self.gone_folders if g != name]
+            self._save()
+
+    def folders_state(self):
+        with self.lock:
+            return [dict(f) for f in self.folders], list(self.gone_folders)
+
+    # ---- writing ----------------------------------------------------------------------
+
+    def put(self, doc):
+        """A new or changed document scanned here; its pages' files are already in its folder."""
+        with self.lock:
+            os.makedirs(self.dir(doc["id"]), exist_ok=True)
+            if doc.get("ocr") == PENDING:
+                # new pages: the old text and PDF no longer match them
+                for name in ("doc.pdf", "text.json"):
+                    try:
+                        os.remove(os.path.join(self.dir(doc["id"]), name))
+                    except OSError:
+                        pass
+                self._texts.pop(doc["id"], None)
+                shutil.rmtree(os.path.join(self.dir(doc["id"]), "render"), ignore_errors=True)
+            keep = {"doc.pdf", "text.json", "render"}
+            for p in doc.get("pages", []):
+                keep |= {p["id"] + ".jpg", p["id"] + ".src.jpg"}
+            for name in os.listdir(self.dir(doc["id"])):
+                if name not in keep and not name.startswith("ocr-"):
+                    path = os.path.join(self.dir(doc["id"]), name)
+                    shutil.rmtree(path, ignore_errors=True) if os.path.isdir(path) else os.remove(path)
+            self.docs[doc["id"]] = doc
+            self._save()
+
+    def update(self, doc_id, **changes):
+        with self.lock:
+            d = self.docs.get(doc_id)
+            if d is None:
+                return
+            d.update(changes)
+            self._save()
+
+    def rename(self, doc_id, name):
+        name = (name or "").strip()
+        self.update(doc_id, name=name or None, named=bool(name), modified=now_ms())
+
+    def move(self, doc_id, folder):
+        self.update(doc_id, folder=folder or "", modified=now_ms())
+
+    def delete(self, doc_id):
+        with self.lock:
+            self.docs.pop(doc_id, None)
+            self._texts.pop(doc_id, None)
+            shutil.rmtree(self.dir(doc_id), ignore_errors=True)
+            self._save()
+
+    def read_again(self, doc_id, lang=None):
+        """Another language, or a better model: the text and the PDF are made again."""
+        with self.lock:
+            d = self.docs.get(doc_id)
+            if d is None or d.get("remote"):
+                return
+            for name in ("doc.pdf", "text.json"):
+                try:
+                    os.remove(os.path.join(self.dir(doc_id), name))
+                except OSError:
+                    pass
+            self._texts.pop(doc_id, None)
+            d.update(ocr=PENDING, lang=lang or d["lang"], rev=d.get("rev", 0) + 1, modified=now_ms())
+            if not d.get("named"):
+                d["name"] = None
+            self._save()
+
+    def ocr_done(self, doc_id, rev, pages, pdf, read_by):
+        """Called once a revision of the document has been read."""
+        with self.lock:
+            d = self.docs.get(doc_id)
+            if d is None or d.get("rev", 0) != rev:
+                return False
+            self._set_text(doc_id, pages)
+            if pdf:
+                os.replace(pdf, self.pdf_file(doc_id))
+            if not d.get("named"):
+                d["name"] = first_words(next((p for p in pages if p.strip()), "")) or d.get("name")
+            d.update(ocr=DONE, readBy=read_by)
+            self._save()
+            return True
+
+    def ocr_failed(self, doc_id, rev, pdf=None):
+        with self.lock:
+            d = self.docs.get(doc_id)
+            if d is None or d.get("rev", 0) != rev:
+                return
+            if pdf:
+                os.replace(pdf, self.pdf_file(doc_id))
+            self._set_text(doc_id, [""] * len(d.get("pages", [])))
+            d.update(ocr=FAILED, readBy="")
+            self._save()
+
+    def put_remote(self, doc, text, drop_pdf):
+        """A document described by another device, new here or changed there."""
+        with self.lock:
+            os.makedirs(self.dir(doc["id"]), exist_ok=True)
+            self._set_text(doc["id"], text)
+            if drop_pdf:
+                try:
+                    os.remove(self.pdf_file(doc["id"]))
+                except OSError:
+                    pass
+                shutil.rmtree(os.path.join(self.dir(doc["id"]), "render"), ignore_errors=True)
+            self.docs[doc["id"]] = doc
+            self._save()
+
+    def forget_server(self):
+        """Another server or folder: every document scanned here goes up again as new; the ones
+        from elsewhere (they live on the old server) go."""
+        with self.lock:
+            for d in list(self.docs.values()):
+                if d.get("remote"):
+                    self.docs.pop(d["id"])
+                    shutil.rmtree(self.dir(d["id"]), ignore_errors=True)
+            for f in self.folders:
+                f["onServer"] = False
+            self.gone_folders = []
+            try:
+                os.remove(os.path.join(self.root, "sync.json"))
+            except OSError:
+                pass
+            self._save()
+
+
+# ------------------------------------------------------------------------------------------
+# WebDAV
+# ------------------------------------------------------------------------------------------
+
+class WebDavError(Exception):
+    pass
+
+
+def encode_segment(s):
+    return quote(s, safe="")
+
+
+def folder_url(cfg):
+    folder = (cfg.get("folder") or "Scans").strip().strip("/") or "Scans"
+    return cfg.get("server", "").strip().rstrip("/") + "/" + "/".join(encode_segment(p) for p in folder.split("/")) + "/"
+
+
+class WebDav:
+    def __init__(self, username, password, timeout=30):
+        self.s = requests.Session()
+        self.s.auth = (username, password)
+        self.s.headers["User-Agent"] = f"{APP}-desktop/{VERSION}"
+        self.timeout = (min(15, timeout), timeout)
+
+    def _req(self, method, url, body=None, depth=None, headers=None, content_type="text/plain; charset=utf-8", allow=(), stream=False):
+        h = dict(headers or {})
+        if depth is not None:
+            h["Depth"] = str(depth)
+        if body is not None:
+            h["Content-Type"] = content_type
+        try:
+            r = self.s.request(method, url, data=body.encode("utf-8") if isinstance(body, str) else body, headers=h, timeout=self.timeout, stream=stream)
+        except requests.RequestException:
+            raise WebDavError(_("cannot reach the server"))
+        if r.status_code == 401:
+            raise WebDavError(_("wrong username or password"))
+        if r.status_code >= 400 and r.status_code not in allow:
+            raise WebDavError(f"{method}: HTTP {r.status_code}")
+        return r
+
+    @staticmethod
+    def _etag(v):
+        if not v:
+            return None
+        v = v.strip()
+        if v.startswith("W/"):
+            v = v[2:]
+        return v.strip('"') or None
+
+    _PROPS = '<?xml version="1.0"?><d:propfind xmlns:d="DAV:"><d:prop><d:getetag/><d:getlastmodified/><d:resourcetype/></d:prop></d:propfind>'
+
+    def list(self, url):
+        """What is directly inside the folder (the folder itself excluded)."""
+        r = self._req("PROPFIND", url, self._PROPS, depth=1, content_type="application/xml; charset=utf-8")
+        try:
+            root = ET.fromstring(r.content)
+        except ET.ParseError:
+            raise WebDavError(_("not a WebDAV folder at this address"))
+        here = unquote(urlparse(url).path).rstrip("/")
+        out = []
+        for resp in root.iter("{DAV:}response"):
+            href = resp.findtext("{DAV:}href")
+            if not href:
+                continue
+            path = unquote(urlparse(urljoin(url, href.strip())).path).rstrip("/")
+            if path == here:
+                continue
+            out.append({"name": path.rsplit("/", 1)[-1], "etag": self._etag(resp.findtext(".//{DAV:}getetag")),
+                        "dir": resp.find(".//{DAV:}resourcetype/{DAV:}collection") is not None})
+        return out
+
+    def etag_of(self, url):
+        r = self._req("PROPFIND", url, self._PROPS, depth=0, content_type="application/xml; charset=utf-8", allow=(404,))
+        if r.status_code == 404:
+            return None
+        try:
+            return self._etag(ET.fromstring(r.content).findtext(".//{DAV:}getetag"))
+        except ET.ParseError:
+            return None
+
+    def get_text(self, url):
+        r = self._req("GET", url, allow=(404,))
+        return None if r.status_code == 404 else r.content.decode("utf-8", "replace")
+
+    def put_text(self, url, text, content_type="application/json; charset=utf-8"):
+        r = self._req("PUT", url, text, content_type=content_type)
+        return self._etag(r.headers.get("ETag")) or self.etag_of(url)
+
+    def put_file(self, url, path, content_type):
+        with open(path, "rb") as f:
+            r = self._req("PUT", url, f, content_type=content_type)
+        return self._etag(r.headers.get("ETag")) or self.etag_of(url)
+
+    def download(self, url, out, progress=None):
+        """False when the server does not have it."""
+        r = self._req("GET", url, allow=(404,), stream=True)
+        if r.status_code == 404:
+            return False
+        total = int(r.headers.get("Content-Length") or 0)
+        done = 0
+        with open(out + ".part", "wb") as f:
+            for chunk in r.iter_content(64 * 1024):
+                f.write(chunk)
+                done += len(chunk)
+                if progress and total:
+                    progress(done * 100 // total)
+        os.replace(out + ".part", out)
+        return True
+
+    def move(self, src, dst):
+        """Renames a file on the server without sending it again; never overwrites."""
+        self._req("MOVE", src, headers={"Destination": dst, "Overwrite": "F"})
+
+    def delete(self, url):
+        self._req("DELETE", url, allow=(404,))
+
+    def mkcol(self, url):
+        self._req("MKCOL", url, allow=(405, 301))
+
+    def exists(self, url):
+        return self._req("PROPFIND", url, depth=0, allow=(404,)).status_code != 404
+
+    def mkdirs(self, url):
+        if self.exists(url):
+            return
+        u = urlparse(url)
+        path = ""
+        for seg in [s for s in u.path.strip("/").split("/") if s]:
+            path += "/" + seg
+            at = f"{u.scheme}://{u.netloc}{path}/"
+            if not self.exists(at):
+                self.mkcol(at)
+
+
+# ------------------------------------------------------------------------------------------
+# Sync: the protocol of readers-scanner/docs/SYNC.md, the same as the phone's sync/Sync.kt.
+#
+#   Scans/<folder>/<date> <name>.pdf     a folder = a subfolder, one level deep
+#   Scans/<date> <name>.pdf              « all scans » only
+#   Scans/.readers-scanner/<id>.json     one description per document
+# ------------------------------------------------------------------------------------------
+
+META_DIR = ".readers-scanner"
+META_FORMAT = "readers-scanner"
+_sync_lock = threading.Lock()
+
+
+def meta_build(doc, pdf, text, pages):
+    return json.dumps({"format": META_FORMAT, "version": 1, "id": doc["id"], "created": doc["created"], "modified": doc.get("modified", doc["created"]),
+                       "name": doc.get("name") or None, "named": bool(doc.get("named")), "folder": doc.get("folder", ""), "lang": doc.get("lang", "eng"),
+                       "pages": pages, "text": list(text), "pdf": pdf, "readBy": doc.get("readBy", ""), "ocr": doc.get("ocr", DONE)},
+                      ensure_ascii=False, indent=1)
+
+
+def meta_parse(s):
+    try:
+        o = json.loads(s)
+        if not isinstance(o, dict) or o.get("format") != META_FORMAT:
+            return None
+        name = o.get("name")
+        return {"id": o["id"], "created": int(o["created"]), "modified": int(o.get("modified", o["created"])),
+                "name": name if isinstance(name, str) and name.strip() else None, "named": bool(o.get("named")),
+                "folder": o.get("folder") or "", "lang": o.get("lang") or "eng", "pages": int(o.get("pages", 0)),
+                "text": [t for t in o.get("text", []) if isinstance(t, str)], "pdf": o["pdf"], "readBy": o.get("readBy") or "",
+                "ocr": o.get("ocr") if o.get("ocr") in (DONE, FAILED) else DONE}
+    except (ValueError, KeyError, TypeError):
+        return None
+
+
+def _key(d):
+    """What the description depends on here."""
+    return f"{d.get('rev', 0)}|{d.get('ocr')}|{title_of(d)}|{d.get('folder', '')}|{d.get('lang')}|{bool(d.get('remote'))}|{bool(d.get('named'))}"
+
+
+def _pdf_key(d):
+    return f"{d.get('rev', 0)}|{d.get('ocr')}"
+
+
+def _read_state(store):
+    try:
+        with open(os.path.join(store.root, "sync.json"), encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {}
+
+
+def _write_state(store, state):
+    path = os.path.join(store.root, "sync.json")
+    with open(path + ".tmp", "w", encoding="utf-8") as f:
+        json.dump(state, f, indent=1, ensure_ascii=False)
+    os.replace(path + ".tmp", path)
+
+
+def sync_run(store, cfg, ensure_pdf, timeout=60):
+    """Two-way sync with the WebDAV folder. `ensure_pdf(doc)` gives the PDF of a document
+    scanned here. Returns (sent, received, deleted)."""
+    with _sync_lock:
+        return _sync_run(store, cfg, ensure_pdf, timeout)
+
+
+def _sync_run(store, cfg, ensure_pdf, timeout):
+    dav = WebDav(cfg.get("username", ""), cfg.get("password", ""), timeout)
+    root = folder_url(cfg)
+    dav.mkdirs(root)
+
+    def url(path):
+        return root + "/".join(encode_segment(p) for p in path.split("/"))
+
+    def dir_url(folder):
+        return root + encode_segment(folder) + "/"
+
+    meta_dir = root + encode_segment(META_DIR) + "/"
+
+    def meta_url(doc_id):
+        return meta_dir + encode_segment(doc_id + ".json")
+
+    entries = dav.list(root)
+    dirs = {e["name"] for e in entries if e["dir"] and not e["name"].startswith(".")}
+    pdfs = {e["name"]: e for e in entries if not e["dir"] and e["name"].lower().endswith(".pdf")}
+    for d in dirs:
+        for e in dav.list(dir_url(d)):
+            if not e["dir"] and e["name"].lower().endswith(".pdf"):
+                pdfs[f"{d}/{e['name']}"] = e
+    if any(e["dir"] and e["name"] == META_DIR for e in entries):
+        metas = {e["name"][:-5]: e for e in dav.list(meta_dir) if not e["dir"] and e["name"].endswith(".json")}
+    else:
+        dav.mkcol(meta_dir)
+        metas = {}
+    state = _read_state(store)
+    folders, gone = store.folders_state()
+    gone = set(gone)
+    up = down = deleted = 0
+
+    # --- folders
+    present = set(dirs)
+    for d in dirs:
+        if d not in gone:
+            store.folder_on_server(d)
+    for f in folders:
+        if f["name"] in dirs:
+            continue
+        if f.get("onServer"):
+            store.folder_gone_there(f["name"])
+        else:
+            dav.mkcol(dir_url(f["name"]))
+            store.folder_on_server(f["name"])
+            present.add(f["name"])
+
+    def ensure_dir(path):
+        folder = path.rpartition("/")[0]
+        if folder and folder not in present:
+            dav.mkcol(dir_url(folder))
+            store.folder_on_server(folder)
+            present.add(folder)
+
+    taken = set()
+
+    def upload(d, sent):
+        nonlocal up
+        folder = d.get("folder", "")
+        base = file_name_of(d)
+
+        def at(name):
+            return f"{folder}/{name}" if folder else name
+
+        name, i = base, 2
+        path = at(name)
+        # another document, or someone's file, already has that name
+        while path != (sent or {}).get("path") and (path in taken or path in pdfs or any(k != d["id"] and s.get("path") == path for k, s in state.items())):
+            name = f"{base[:-4]} ({i}).pdf"
+            path = at(name)
+            i += 1
+        if not d.get("remote") and (sent is None or sent.get("pdfKey") != _pdf_key(d) or sent["path"] not in pdfs):
+            pdf = ensure_pdf(d)
+            if not pdf:
+                return
+            ensure_dir(path)
+            etag = dav.put_file(url(path), pdf, "application/pdf")
+            if sent is not None and sent["path"] != path and sent["path"] in pdfs:
+                dav.delete(url(sent["path"]))
+        elif sent is not None and sent["path"] != path and sent["path"] in pdfs:
+            ensure_dir(path)
+            dav.move(url(sent["path"]), url(path))
+            etag = dav.etag_of(url(path))
+        else:
+            if sent is None:
+                return              # a document from elsewhere never goes up as a new file
+            path, etag = sent["path"], sent.get("etag")
+        taken.add(path)
+        meta_etag = dav.put_text(meta_url(d["id"]), meta_build(d, path, store.text(d["id"]), Store.page_count(d)))
+        state[d["id"]] = {"path": path, "etag": etag, "key": _key(d), "pdfKey": _pdf_key(d), "metaEtag": meta_etag or "?"}
+        _write_state(store, state)
+        up += 1
+
+    def folder_here(name):
+        return (store.folder_by_name(name) or store.folder_on_server(name)) if name else ""
+
+    # --- 1. documents described on the server
+    for doc_id, mf in metas.items():
+        local = store.get(doc_id)
+        sent = state.get(doc_id)
+        if local is None:
+            if sent is not None and (sent.get("metaEtag") is None or sent.get("metaEtag") == mf["etag"]):
+                # deleted here, unchanged there: deleted there too
+                if sent["path"] in pdfs:
+                    dav.delete(url(sent["path"]))
+                dav.delete(meta_url(doc_id))
+                state.pop(doc_id)
+                _write_state(store, state)
+                deleted += 1
+                continue
+            m = meta_parse(dav.get_text(meta_url(doc_id)) or "")
+            if m is None:
+                continue
+            doc = {"id": m["id"], "created": m["created"], "modified": m["modified"], "name": m["name"], "named": m["named"],
+                   "folder": folder_here(m["folder"]), "lang": m["lang"], "pages": [], "ocr": m["ocr"], "rev": 0, "readBy": m["readBy"],
+                   "remote": True, "pageCount": m["pages"]}
+            store.put_remote(doc, m["text"], drop_pdf=True)
+            state[doc_id] = {"path": m["pdf"], "etag": (pdfs.get(m["pdf"]) or {}).get("etag"), "key": _key(doc), "pdfKey": _pdf_key(doc), "metaEtag": mf["etag"]}
+            _write_state(store, state)
+            down += 1
+            continue
+        changed_there = sent is None or (sent.get("metaEtag") is not None and sent.get("metaEtag") != mf["etag"])
+        changed_here = sent is None or sent.get("key") != _key(local)
+        if changed_there:
+            m = meta_parse(dav.get_text(meta_url(doc_id)) or "")
+            if m is None:
+                continue
+            if not changed_here or m["modified"] > local.get("modified", local["created"]):
+                # theirs is the latest
+                if local.get("remote"):
+                    pdf_changed = sent is None or sent.get("etag") != (pdfs.get(m["pdf"]) or {}).get("etag")
+                    local.update(name=m["name"], named=m["named"], folder=folder_here(m["folder"]), lang=m["lang"], ocr=m["ocr"],
+                                 readBy=m["readBy"], pageCount=m["pages"], modified=m["modified"])
+                    store.put_remote(local, m["text"], drop_pdf=pdf_changed)
+                else:
+                    store.update(doc_id, name=m["name"], named=m["named"], folder=folder_here(m["folder"]), modified=m["modified"])
+                now = store.get(doc_id)
+                state[doc_id] = {"path": m["pdf"], "etag": (pdfs.get(m["pdf"]) or {}).get("etag"), "key": _key(now), "pdfKey": _pdf_key(now), "metaEtag": mf["etag"]}
+                _write_state(store, state)
+                down += 1
+                continue
+            # ours is the latest; its file is where they left it
+            sent = dict(sent or {}, path=m["pdf"], etag=(pdfs.get(m["pdf"]) or {}).get("etag"))
+        if (changed_here or (sent or {}).get("metaEtag") is None) and local.get("ocr") != PENDING:
+            upload(local, sent)
+        elif sent:
+            taken.add(sent["path"])
+
+    # --- 2. documents here without a description there
+    for d in sorted(store.all(), key=lambda d: d["created"]):
+        if d["id"] in metas:
+            continue
+        sent = state.get(d["id"])
+        if sent is not None and sent.get("metaEtag") is not None:
+            # its description went: deleted there — here too, unless it changed here since
+            if sent.get("key") == _key(d):
+                store.delete(d["id"])
+                state.pop(d["id"])
+                _write_state(store, state)
+                deleted += 1
+                continue
+        if d.get("remote") or d.get("ocr") == PENDING:
+            continue
+        upload(d, sent)
+
+    # --- 3. deleted here before ever being described (sent by an old version)
+    for doc_id, s in list(state.items()):
+        if store.get(doc_id) is not None or doc_id in metas:
+            continue
+        there = pdfs.get(s["path"])
+        if there is not None and (s.get("etag") is None or there["etag"] is None or there["etag"] == s["etag"]):
+            dav.delete(url(s["path"]))
+            deleted += 1
+        state.pop(doc_id)
+        _write_state(store, state)
+
+    # --- 4. folders deleted or renamed here: removed there once empty
+    for g in gone:
+        if g in dirs and not any(not e["dir"] for e in dav.list(dir_url(g))):
+            dav.delete(dir_url(g))
+        store.folder_removed_there(g)
+    return up, down, deleted
+
+
+def fetch_pdf(store, cfg, doc, progress=None):
+    """Brings down the PDF of a document from elsewhere. None when the server does not have it."""
+    path = (_read_state(store).get(doc["id"]) or {}).get("path")
+    if not path:
+        return None
+    os.makedirs(store.dir(doc["id"]), exist_ok=True)
+    dav = WebDav(cfg.get("username", ""), cfg.get("password", ""), 120)
+    out = store.pdf_file(doc["id"])
+    ok = dav.download(folder_url(cfg) + "/".join(encode_segment(p) for p in path.split("/")), out, progress)
+    return out if ok else None
+
+
+# ------------------------------------------------------------------------------------------
+# Pages: the four looks (the phone's clean-up, on numpy), blank pages, the page as shown
+# ------------------------------------------------------------------------------------------
+
+DPI = 300
+JPEG_QUALITY = 85
+
+
+def _max3(a, r):
+    """Maximum over a (2r+1)² neighbourhood."""
+    p = np.pad(a, r, mode="edge")
+    out = a.copy()
+    h, w = a.shape
+    for dy in range(2 * r + 1):
+        for dx in range(2 * r + 1):
+            np.maximum(out, p[dy:dy + h, dx:dx + w], out=out)
+    return out
+
+
+def _mean3(a):
+    p = np.pad(a, 1, mode="edge")
+    h, w = a.shape
+    return sum(p[dy:dy + h, dx:dx + w] for dy in range(3) for dx in range(3)) / 9.0
+
+
+def _background(lum):
+    """The brightness the paper would have at each pixel without ink: the brightest value of
+    blocks larger than a letter, widened and smoothed, spread back over every pixel. Floored at
+    half the paper's usual brightness, so a photo on the page is not blown out to white."""
+    h, w = lum.shape
+    b = max(8, max(w, h) // 64)
+    gh, gw = -(-h // b), -(-w // b)
+    padded = np.pad(lum, ((0, gh * b - h), (0, gw * b - w)), mode="edge")
+    grid = padded.reshape(gh, b, gw, b).max(axis=(1, 3)).astype(np.float32)
+    grid = _mean3(_mean3(_max3(grid, 2)))
+    paper = np.sort(grid, axis=None)[min(grid.size - 1, int(grid.size * 0.9))]
+    grid = np.maximum(grid, max(40.0, paper * 0.5))
+    return np.asarray(Image.fromarray(grid, mode="F").resize((w, h), Image.BILINEAR), dtype=np.float32)
+
+
+def _levels(v):
+    t = np.clip((v - 40.0) / 195.0, 0.0, 1.0)
+    return np.clip((t * t * (3 - 2 * t) * 0.5 + t * 0.5) * 255.0, 0, 255).astype(np.uint8)
+
+
+def apply_look(img, look):
+    """clean: the paper turns white, shadows evened out, colours kept. grey: the same, in grey.
+    bw: black ink on white. original: untouched."""
+    if look not in ("clean", "grey", "bw"):
+        return img
+    rgb = np.asarray(img.convert("RGB"), dtype=np.float32)
+    lum = (rgb[..., 0] * 77 + rgb[..., 1] * 150 + rgb[..., 2] * 29) / 256.0
+    bg = _background(lum)
+    if look == "clean":
+        return Image.fromarray(_levels(rgb * (255.0 / bg)[..., None]), "RGB")
+    flat = lum * 255.0 / bg
+    if look == "grey":
+        return Image.fromarray(_levels(flat), "L")
+    flat = np.minimum(flat, 255.0)
+    h, w = flat.shape
+    r = max(6, max(w, h) // 80)
+    integral = np.pad(flat.astype(np.float64), ((1, 0), (1, 0))).cumsum(0).cumsum(1)
+    y0 = np.clip(np.arange(h) - r, 0, h)[:, None]; y1 = np.clip(np.arange(h) + r + 1, 0, h)[:, None]
+    x0 = np.clip(np.arange(w) - r, 0, w)[None, :]; x1 = np.clip(np.arange(w) + r + 1, 0, w)[None, :]
+    mean = (integral[y1, x1] - integral[y0, x1] - integral[y1, x0] + integral[y0, x0]) / ((y1 - y0) * (x1 - x0))
+    return Image.fromarray(np.where((flat < mean * 0.86) | (flat < 90), 0, 255).astype(np.uint8), "L")
+
+
+def is_blank(path):
+    """A page with nothing on it (the back of a one-sided sheet in a two-sided scan): after
+    evening out the paper, hardly any pixel is clearly darker than it. The edges are left out
+    (shadows of the sheet), and single specks of dust do not count."""
+    try:
+        img = Image.open(path)
+        img.draft("L", (img.width // 2, img.height // 2))
+        img = img.convert("L")
+        img.thumbnail((1200, 1200))
+        lum = np.asarray(img, dtype=np.float32)
+    except (OSError, ValueError):
+        return False
+    h, w = lum.shape
+    my, mx = int(h * 0.04), int(w * 0.04)
+    flat = (lum * 255.0 / _background(lum))[my:h - my, mx:w - mx]
+    ink = _mean3(flat) < 165            # a speck of dust is averaged away, show-through is too pale
+    # measured at this size: an empty sheet 0, a page number alone 50, a short letter 8000
+    return int(ink.sum()) < 16
+
+
+def open_upright(path, rotation=0, draft=None):
+    img = Image.open(path)
+    if draft:
+        img.draft("RGB", draft)
+    img = img.convert("RGB")
+    if rotation % 360:
+        img = img.transpose({90: Image.ROTATE_270, 180: Image.ROTATE_180, 270: Image.ROTATE_90}[rotation % 360])
+    return img
+
+
+def render_page(src, out, rotation, look):
+    """The page as shown and as it goes into the PDF. An untouched scan is kept as it is."""
+    if look == "original" and rotation % 360 == 0:
+        if os.path.abspath(src) != os.path.abspath(out):
+            shutil.copyfile(src, out)
+        return
+    img = apply_look(open_upright(src, rotation), look)
+    img.save(out + ".tmp", "JPEG", quality=80 if look == "bw" else JPEG_QUALITY, dpi=(DPI, DPI))
+    os.replace(out + ".tmp", out)
+
+
+# Tesseract's glyphless font (tessdata/pdf.ttf, Apache 2.0): every character an empty glyph half
+# an em wide, so any language's text can lie invisibly over the page.
+_GLYPHLESS = base64.b64decode(
+    "AAEAAAAKAIAAAwAgT1MvMlbeyJQAAAEoAAAAYGNtYXAACgA0AAABkAAAAB5nbHlmFSJBJAAAAbgAAAAYaGVhZAt48WUAAACsAAAANmhoZWEMAgQCAAAA5AAAACRobXR4BAAAAAAAAYgAAAAI"
+    "bG9jYQAMAAAAAAGwAAAABm1heHAABAAFAAABCAAAACBuYW1l8usW2gAAAdAAAABLcG9zdAABAAEAAAIcAAAAIAABAAAAAQAAsJRxEF8PPPUEBwgAAAAAAM+a/G4AAAAA1MOn8gAAAAAEAAgAAAAA"
+    "EAACAAAAAAAAAAEAAAgA//8AAAQAAAAAAAQAAAEAAAAAAAAAAAAAAAAAAAACAAEAAAACAAQAAQAAAAAAAQAAAAAAAAAAAAAAAAAAAAAAAwAAAZAABQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAUA"
+    "AQABAAAAAAAAAAAAAAAAAAAAAAAAAAAAR09PRwBAAAAAAAAB//8AAAABAAGAAAAAAAAAAAAAAAAAAAABAAAAAAAABAAAAAAAAAIAAQAAAAAAFAADAAAAAAAUAAYACgAAAAAAAAAAAAAAAAAMAAAA"
+    "AQAAAAAEAAgAAAMAADEhESEEAPwACAAAAAADACoAAAADAAAABQAWAAAAAQAAAAAABQALABYAAwABBAkABQAWAAAAVgBlAHIAcwBpAG8AbgAgADEALgAwVmVyc2lvbiAxLjAAAAEAAAAAAAAAAAAA"
+    "AAAAAQAAAAAAAAAAAAAAAAAAAAA=")
+_TO_UNICODE = b"""/CIDInit /ProcSet findresource begin
+12 dict begin
+begincmap
+/CIDSystemInfo << /Registry (Adobe) /Ordering (UCS) /Supplement 0 >> def
+/CMapName /Adobe-Identify-UCS def
+/CMapType 2 def
+1 begincodespacerange
+<0000> <FFFF>
+endcodespacerange
+1 beginbfrange
+<0000> <FFFF> <0000>
+endbfrange
+endcmap
+CMapName currentdict /CMap defineresource pop
+end
+end
+"""
+
+
+def page_inches(path, w, h):
+    """The width in inches a page picture stands for: from its resolution when it says one that
+    makes sense, otherwise as if its long side were A4's (or Letter's, for a page of that shape)."""
+    try:
+        dpi = float(Image.open(path).info.get("dpi", (0, 0))[0])
+    except (OSError, ValueError, TypeError):
+        dpi = 0
+    if 70 <= dpi <= 1300 and max(w, h) / dpi <= 20:
+        return w / dpi
+    long_side = 11.0 if abs(min(w, h) / max(w, h) - 8.5 / 11) < 0.012 else 11.69
+    return w * long_side / max(w, h)
+
+
+def write_pdf(pages, out, title="", layers=None):
+    """The document's PDF: each page picture as it is (the JPEG goes in untouched), and over it,
+    invisible, the lines read on it (`layers`: per page, lines of words with their boxes in the
+    picture's pixels), so the PDF can be searched and its text copied."""
+    objs = []                  # bytes of each object, numbered from 1
+
+    def add(body):
+        objs.append(body if isinstance(body, bytes) else body.encode("latin-1"))
+        return len(objs)
+
+    def stream(data, extra=""):
+        return f"<< {extra} /Length {len(data)} >>\nstream\n".encode("latin-1") + data + b"\nendstream"
+
+    catalog, tree = add(b""), add(b"")
+    info = add("<< /Title <FEFF" + title.encode("utf-16-be").hex().upper() + "> /Producer (Reader's Scanner) >>")
+    font = None
+    if layers and any(layers):
+        file2 = add(stream(zlib.compress(_GLYPHLESS), f"/Filter /FlateDecode /Length1 {len(_GLYPHLESS)}"))
+        descriptor = add(f"<< /Type /FontDescriptor /FontName /GlyphLessFont /FontFile2 {file2} 0 R /Ascent 1000 /CapHeight 1000 /Descent -1 /Flags 5 "
+                         "/FontBBox [ 0 0 500 1000 ] /ItalicAngle 0 /StemV 80 >>")
+        to_unicode = add(stream(_TO_UNICODE))
+        gids = add(stream(zlib.compress(b"\x00\x01" * 65536), "/Filter /FlateDecode"))
+        cid = add(f"<< /Type /Font /Subtype /CIDFontType2 /BaseFont /GlyphLessFont /CIDToGIDMap {gids} 0 R /DW 500 /FontDescriptor {descriptor} 0 R "
+                  "/CIDSystemInfo << /Ordering (Identity) /Registry (Adobe) /Supplement 0 >> >>")
+        font = add(f"<< /Type /Font /Subtype /Type0 /BaseFont /GlyphLessFont /DescendantFonts [ {cid} 0 R ] /Encoding /Identity-H /ToUnicode {to_unicode} 0 R >>")
+    kids = []
+    for i, path in enumerate(pages):
+        img = Image.open(path)
+        w, h = img.size
+        if img.format == "JPEG" and img.mode in ("L", "RGB"):
+            with open(path, "rb") as f:
+                data = f.read()
+            space = "/DeviceGray" if img.mode == "L" else "/DeviceRGB"
+        else:                  # anything else becomes a JPEG on the way
+            import io
+            buf = io.BytesIO()
+            img.convert("RGB").save(buf, "JPEG", quality=JPEG_QUALITY)
+            data, space = buf.getvalue(), "/DeviceRGB"
+        k = page_inches(path, w, h) * 72.0 / w          # points per pixel
+        pw, ph = w * k, h * k
+        image = add(stream(data, f"/Type /XObject /Subtype /Image /Width {w} /Height {h} /ColorSpace {space} /BitsPerComponent 8 /Filter /DCTDecode"))
+        ops = [f"q {pw:.2f} 0 0 {ph:.2f} 0 0 cm /Im0 Do Q"]
+        lines = (layers[i] if layers and i < len(layers) else None) or []
+        if lines and font:
+            ops.append("BT 3 Tr")
+            for line in lines:
+                top, bottom = min(wd[2] for wd in line), max(wd[4] for wd in line)
+                size = max(3.0, (bottom - top) * k * 0.8)
+                base = ph - (top + (bottom - top) * 0.8) * k
+                for j, (text, left, _t, right, _b) in enumerate(line):
+                    text += " "
+                    units = len(text.encode("utf-16-be")) // 2
+                    until = line[j + 1][1] if j + 1 < len(line) else right + size / k * 0.25
+                    stretch = max(10.0, min(1000.0, 100.0 * max(1.0, until - left) * k / (units * 0.5 * size)))
+                    ops.append(f"/F0 {size:.2f} Tf {stretch:.1f} Tz 1 0 0 1 {left * k:.2f} {base:.2f} Tm <{text.encode('utf-16-be').hex().upper()}> Tj")
+            ops.append("ET")
+        content = add(stream(zlib.compress("\n".join(ops).encode("latin-1")), "/Filter /FlateDecode"))
+        fonts = f"/Font << /F0 {font} 0 R >> " if font else ""
+        kids.append(add(f"<< /Type /Page /Parent {tree} 0 R /MediaBox [ 0 0 {pw:.2f} {ph:.2f} ] /Contents {content} 0 R "
+                        f"/Resources << /XObject << /Im0 {image} 0 R >> {fonts}>> >>"))
+    if not kids:
+        return None
+    objs[catalog - 1] = f"<< /Type /Catalog /Pages {tree} 0 R >>".encode()
+    objs[tree - 1] = f"<< /Type /Pages /Count {len(kids)} /Kids [ {' '.join(f'{n} 0 R' for n in kids)} ] >>".encode()
+    with open(out + ".tmp", "wb") as f:
+        f.write(b"%PDF-1.5\n%\xe2\xe3\xcf\xd3\n")
+        offsets = []
+        for n, body in enumerate(objs, 1):
+            offsets.append(f.tell())
+            f.write(f"{n} 0 obj\n".encode() + body + b"\nendobj\n")
+        xref = f.tell()
+        f.write(f"xref\n0 {len(objs) + 1}\n0000000000 65535 f \n".encode())
+        for o in offsets:
+            f.write(f"{o:010d} 00000 n \n".encode())
+        f.write(f"trailer\n<< /Size {len(objs) + 1} /Root {catalog} 0 R /Info {info} 0 R >>\nstartxref\n{xref}\n%%EOF\n".encode())
+    os.replace(out + ".tmp", out)
+    return out
+
+
+def plain_pdf(pages, out, title=""):
+    """A PDF of the pages without text, when nothing can read them."""
+    return write_pdf(pages, out, title)
+
+
+def reading_copy(page, look, out):
+    """The page as the reader wants it: grey, the paper evened out to white. Commas and dots get
+    lost on a raw scan (measured: « TVA 8,1 % : 7,97 » read « TVA 81% :797 »); on this copy they
+    are read. A page already cleaned is read as it is."""
+    if look in ("clean", "grey", "bw"):
+        return page
+    apply_look(Image.open(page).convert("RGB"), "grey").save(out, "JPEG", quality=92, dpi=(DPI, DPI))
+    return out
+
+
+def import_image(path, out):
+    """Any picture as a page: upright (EXIF), JPEG."""
+    from PIL import ImageOps
+    img = ImageOps.exif_transpose(Image.open(path)).convert("RGB")
+    dpi = img.info.get("dpi", (0, 0))[0] or max(72, round(max(img.size) / 11.69))
+    img.save(out, "JPEG", quality=90, dpi=(dpi, dpi))
+
+
+# ------------------------------------------------------------------------------------------
+# Reading the text: Tesseract, on this computer. The system's models (the distribution's
+# packages) read at once; the « best » ones, more accurate, are downloaded into the app's own
+# folder — on request, or by themselves for a language the system does not have.
+# ------------------------------------------------------------------------------------------
+
+LANGS = ("eng", "fra", "deu", "ita", "spa", "por", "rus")
+LANG_NAMES = {"eng": "English", "fra": "français", "deu": "Deutsch", "ita": "italiano", "spa": "español", "por": "português", "rus": "русский"}
+MODEL_MB = {"eng": 15, "fra": 4, "deu": 9, "ita": 9, "spa": 14, "por": 8, "rus": 15}
+BEST_URL = "https://github.com/tesseract-ocr/tessdata_best/raw/main/%s.traineddata"
+
+
+def default_lang():
+    return {"fr": "fra", "de": "deu", "it": "ita", "es": "spa", "pt": "por", "ru": "rus"}.get(_LANG, "eng")
+
+
+class ReadError(Exception):
+    pass
+
+
+class Reader:
+    def __init__(self, data_dir):
+        self.dir = os.path.join(data_dir, "tessdata")
+        self._system = None
+        self.downloading = {}          # language → percent
+        self.prefer_best = True        # the most accurate model, fetched at the first reading in a language
+        self.refused = {}              # language → when its download last failed
+
+    @staticmethod
+    def exe():
+        return shutil.which(os.environ.get("READERS_SCANNER_TESSERACT") or "tesseract")
+
+    def system(self):
+        """(the system's tessdata folder, its languages)."""
+        if self._system is None:
+            folder, langs = None, []
+            if self.exe():
+                try:
+                    out = subprocess.run([self.exe(), "--list-langs"], capture_output=True, text=True, timeout=20)
+                    lines = (out.stdout + out.stderr).splitlines()
+                    m = re.search(r'"([^"]+)"', lines[0]) if lines else None
+                    folder = m.group(1) if m else None
+                    langs = [l.strip() for l in lines[1:] if l.strip()]
+                except (OSError, subprocess.SubprocessError):
+                    pass
+            self._system = (folder, langs)
+        return self._system
+
+    def has_best(self, lang):
+        p = os.path.join(self.dir, lang + ".traineddata")
+        return os.path.exists(p) and os.path.getsize(p) > 500_000
+
+    def remove_best(self, lang):
+        try:
+            os.remove(os.path.join(self.dir, lang + ".traineddata"))
+        except OSError:
+            pass
+
+    def _fetch(self, url, out, lang=None):
+        r = requests.get(url, stream=True, timeout=(15, 60), headers={"User-Agent": f"{APP}-desktop/{VERSION}"})
+        r.raise_for_status()
+        total = int(r.headers.get("Content-Length") or 0) or MODEL_MB.get(lang, 10) * 1_000_000
+        done = 0
+        with open(out + ".part", "wb") as f:
+            for chunk in r.iter_content(64 * 1024):
+                f.write(chunk)
+                done += len(chunk)
+                if lang:
+                    self.downloading[lang] = min(99, done * 100 // total)
+        os.replace(out + ".part", out)
+
+    def download(self, lang):
+        """The best model of a language, into the app's folder. True when it is there."""
+        if self.has_best(lang):
+            return True
+        if time.time() - self.refused.get(lang, 0) < 600:
+            return False               # no network a moment ago: not at every document
+        os.makedirs(self.dir, exist_ok=True)
+        self.downloading[lang] = 0
+        try:
+            self._fetch(BEST_URL % lang, os.path.join(self.dir, lang + ".traineddata"), lang)
+            return self.has_best(lang)
+        except (OSError, requests.RequestException):
+            self.refused[lang] = time.time()
+            return False
+        finally:
+            self.downloading.pop(lang, None)
+
+    def model_for(self, lang):
+        """(tessdata folder or None for the system's, the reader's name)."""
+        if self.prefer_best and (self.has_best(lang) or self.download(lang)):
+            return self.dir, "tesseract-best"
+        if lang in self.system()[1]:
+            return None, "tesseract-fast"
+        if self.has_best(lang) or self.download(lang):
+            return self.dir, "tesseract-best"
+        raise ReadError(_("no reading model for %1 — it could not be downloaded", LANG_NAMES.get(lang, lang)))
+
+    def read(self, pages, lang, work, progress=None):
+        """Reads the pictures (one per page). Returns (the text of each page, the lines of each
+        page as lists of (word, left, top, right, bottom), the reader's name). `work`: a path
+        to write beside."""
+        if not self.exe():
+            raise ReadError(_("Tesseract is not installed: the pages are kept without their text"))
+        folder, read_by = self.model_for(lang)
+        listing = work + ".list"
+        with open(listing, "w", encoding="utf-8") as f:
+            f.write("\n".join(pages) + "\n")
+        cmd = [self.exe(), listing, work, "-l", lang, "--dpi", str(DPI)]
+        if folder:
+            cmd += ["--tessdata-dir", folder]
+        cmd += ["-c", "tessedit_create_tsv=1", "-c", "tessedit_create_txt=1"]
+        env = dict(os.environ, OMP_THREAD_LIMIT=str(max(1, min(4, os.cpu_count() or 1))))
+        errors = []
+        try:
+            proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True, errors="replace", env=env)
+            for line in proc.stderr:
+                m = re.match(r"Page (\d+)", line)
+                if m and progress:
+                    progress(min(len(pages), int(m.group(1))), len(pages))
+                elif line.strip():
+                    errors.append(line.strip())
+            proc.wait()
+        except OSError as e:
+            raise ReadError(str(e))
+        finally:
+            try:
+                os.remove(listing)
+            except OSError:
+                pass
+        if proc.returncode != 0 or not os.path.exists(work + ".tsv"):
+            raise ReadError(errors[-1] if errors else "tesseract")
+        try:
+            with open(work + ".txt", encoding="utf-8", errors="replace") as f:
+                text = f.read().split("\f")
+            os.remove(work + ".txt")
+        except OSError:
+            text = []
+        text = [t.strip() for t in text[:len(pages)]]
+        text += [""] * (len(pages) - len(text))
+        layers = [[] for _p in pages]
+        lines = {}
+        with open(work + ".tsv", encoding="utf-8", errors="replace") as f:
+            for row in f:
+                c = row.rstrip("\n").split("\t", 11)
+                if len(c) < 12 or c[0] != "5" or not c[11].strip():
+                    continue
+                try:
+                    page, left, top, width, height = int(c[1]) - 1, int(c[6]), int(c[7]), int(c[8]), int(c[9])
+                except ValueError:
+                    continue
+                if 0 <= page < len(pages):
+                    key = (page, c[2], c[3], c[4])
+                    if key not in lines:
+                        lines[key] = []
+                        layers[page].append(lines[key])
+                    lines[key].append((c[11].strip(), left, top, left + width, top + height))
+        os.remove(work + ".tsv")
+        return text, layers, read_by
+
+
+def upright_rotations(files, reader):
+    """Sheets fed upside down or sideways: how far each page must be turned to read upright
+    (Tesseract's orientation detection, on a few pages at a time). 0 when it is not sure, when
+    the page has too little text, or when the orientation model is not there."""
+    exe = reader.exe()
+    if not exe or "osd" not in reader.system()[1]:
+        return {}
+
+    def one(path):
+        try:
+            out = subprocess.run([exe, path, "-", "--psm", "0", "-l", "osd", "--dpi", str(DPI)], capture_output=True, text=True, timeout=60)
+            turn = re.search(r"Rotate: (\d+)", out.stdout)
+            sure = re.search(r"Orientation confidence: ([\d.]+)", out.stdout)
+            if turn and sure and float(sure.group(1)) >= 2.5 and int(turn.group(1)) in (90, 180, 270):
+                return int(turn.group(1))
+        except (OSError, subprocess.SubprocessError, ValueError):
+            pass
+        return 0
+
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max(1, min(4, os.cpu_count() or 1))) as pool:
+        return {f: r for f, r in zip(files, pool.map(one, files)) if r}
+
+
+class ReadQueue:
+    """Reads filed documents one at a time, off the UI thread: makes the pages as shown, reads
+    them, names the document after its first words. Documents still waiting when the app was
+    closed are taken up again at the next start."""
+
+    def __init__(self, store, reader, on_done=None, on_progress=None):
+        self.store, self.reader = store, reader
+        self.on_done, self.on_progress = on_done, on_progress
+        self.q = queue.Queue()
+        self.working = {}              # document → "2/5"
+        self.errors = {}               # document → why it could not be read
+        self.thread = threading.Thread(target=self._run, daemon=True)
+        self.thread.start()
+        for doc_id in store.pending():
+            self.q.put(doc_id)
+
+    def enqueue(self, doc_id):
+        self.q.put(doc_id)
+
+    def idle(self):
+        return self.q.empty() and not self.working
+
+    def _say(self, doc_id, text):
+        if text is None:
+            self.working.pop(doc_id, None)
+        else:
+            self.working[doc_id] = text
+        if self.on_progress:
+            self.on_progress()
+
+    def _run(self):
+        while True:
+            doc_id = self.q.get()
+            doc = self.store.get(doc_id)
+            if doc is None or doc.get("ocr") != PENDING or doc.get("remote"):
+                continue
+            try:
+                self._read(doc)
+            except Exception as e:     # a page that cannot be opened, a disk that is full…
+                self.errors[doc_id] = str(e)
+                self.store.ocr_failed(doc_id, doc.get("rev", 0))
+            self._say(doc_id, None)
+            if self.on_done:
+                self.on_done(doc_id)
+
+    def _read(self, doc):
+        doc_id, rev = doc["id"], doc.get("rev", 0)
+        self._say(doc_id, "")
+        pages = []
+        for p in doc["pages"]:
+            out = self.store.page_file(doc_id, p["id"])
+            if not os.path.exists(out):
+                render_page(self.store.src_file(doc_id, p["id"]), out, p.get("rotation", 0), p.get("look", "original"))
+            pages.append(out)
+        base = os.path.join(self.store.dir(doc_id), "ocr-out")
+        copies = []
+        try:
+            for i, (p, f) in enumerate(zip(doc["pages"], pages)):
+                copies.append(reading_copy(f, p.get("look", "original"), f"{base}-{i}.jpg"))
+            text, layers, read_by = self.reader.read(copies, doc.get("lang", "eng"), base, lambda i, n: self._say(doc_id, f"{i}/{n}"))
+            self.errors.pop(doc_id, None)
+            named = doc if doc.get("named") else dict(doc, name=first_words(next((t for t in text if t.strip()), "")) or doc.get("name"))
+            if not self.store.ocr_done(doc_id, rev, text, write_pdf(pages, base + ".pdf", title_of(named), layers), read_by):
+                self.q.put(doc_id)     # its pages changed meanwhile: read again
+        except ReadError as e:
+            self.errors[doc_id] = str(e)
+            self.store.ocr_failed(doc_id, rev, plain_pdf(pages, base + ".pdf", title_of(doc)))
+        finally:
+            for c in copies:
+                if c not in pages:
+                    try:
+                        os.remove(c)
+                    except OSError:
+                        pass
+
+
+# ------------------------------------------------------------------------------------------
+# The scanner: NAPS2 does the acquisition (naps2.com, a separate program), through its
+# console. It gets a settings folder of its own (NAPS2_TEST_DATA) holding one profile that
+# names the device: a scan then starts at once, without NAPS2 looking for scanners again
+# (10 s with SANE), and the user's own NAPS2 profiles are never touched.
+# ------------------------------------------------------------------------------------------
+
+NAPS2_URL = "https://www.naps2.com/download"
+SOURCES = ("auto", "glass", "feeder", "duplex")
+_ERRORS = (   # what NAPS2 says (in English: the console is run with that language) → our word for it
+    ("No pages are in the feeder", "empty"), ("does not support using a feeder", "nofeeder"), ("does not support using duplex", "noduplex"),
+    ("could not be found", "notfound"), ("scanner is offline", "offline"), ("scanner is busy", "busy"), ("cover is open", "cover"),
+    ("paper jam", "jam"), ("warming up", "warming"), ("was interrupted", "comm"), ("SANE driver is not available", "nosane"),
+    ("No device was specified", "notfound"), ("error occurred with the scanning driver", "driver"), ("unexpected error", "driver"),
+    ("worker process crashed", "driver"),
+)
+
+
+def error_text(code, detail=""):
+    return {
+        "empty": _("the feeder is empty"), "nofeeder": _("this scanner has no feeder"), "noduplex": _("this scanner cannot scan both sides"),
+        "notfound": _("the scanner is not answering — is it switched on?"), "offline": _("the scanner is not answering — is it switched on?"),
+        "busy": _("the scanner is busy"), "cover": _("the scanner's cover is open"), "jam": _("paper jam in the scanner"),
+        "warming": _("the scanner is warming up — try again in a moment"), "comm": _("the connection to the scanner was interrupted"),
+        "nosane": _("SANE is not installed (the scanner drivers)"), "cancelled": _("scan cancelled"),
+        "nodevice": _("no scanner found — is it switched on?"), "nonaps2": _("NAPS2 is not installed"),
+    }.get(code) or (detail or _("the scan did not work"))
+
+
+def _model_key(name):
+    """The same scanner reached by several drivers gets the same key."""
+    n = re.sub(r"\([^)]*\)", " ", name.lower().replace("_", " "))
+    n = re.sub(r"\b(hewlett[- ]?packard|hp|canon|epson|brother|fujitsu|ricoh|samsung|xerox|kodak|lexmark|kyocera)\b", " ", n)
+    return re.sub(r"[^a-z0-9]", "", n) or re.sub(r"[^a-z0-9]", "", name.lower())
+
+
+_BACKEND_ORDER = ("airscan", "escl")     # driverless first: they work without the maker's software
+
+
+class Naps2:
+    def __init__(self, data_dir):
+        self.data = os.path.join(data_dir, "naps2")
+        self.cmd = self.find()
+        self.version = self._version() if self.cmd else None
+        if self.version is None:
+            self.cmd = None            # there, but it does not run: as good as absent
+        self.proc = None
+        self._cancelled = False
+
+    @staticmethod
+    def find():
+        env = os.environ.get("READERS_SCANNER_NAPS2")
+        if env:
+            return shlex.split(env)
+        if sys.platform == "win32":
+            for base in (os.environ.get("ProgramFiles"), os.environ.get("ProgramFiles(x86)"), os.environ.get("LOCALAPPDATA")):
+                p = os.path.join(base or "", "NAPS2", "NAPS2.Console.exe")
+                if os.path.exists(p):
+                    return [p]
+            return None
+        if sys.platform == "darwin":
+            p = "/Applications/NAPS2.app/Contents/MacOS/NAPS2"
+            return [p, "console"] if os.path.exists(p) else None
+        exe = shutil.which("naps2")
+        if exe:
+            return [exe, "console"]
+        if shutil.which("flatpak"):
+            try:
+                if subprocess.run(["flatpak", "info", "com.naps2.Naps2"], capture_output=True, timeout=10).returncode == 0:
+                    return ["flatpak", "run", "--command=naps2", "com.naps2.Naps2", "console"]
+            except (OSError, subprocess.SubprocessError):
+                pass
+        return None
+
+    @property
+    def flatpak(self):
+        return bool(self.cmd) and self.cmd[0] == "flatpak"
+
+    @property
+    def driver(self):
+        return "wia" if sys.platform == "win32" else "apple" if sys.platform == "darwin" else "sane"
+
+    def _env(self):
+        env = dict(os.environ, LC_ALL="en_US.UTF-8", LANG="en_US.UTF-8", LANGUAGE="en")
+        if not self.flatpak:
+            os.makedirs(self.data, exist_ok=True)
+            env["NAPS2_TEST_DATA"] = self.data
+        return env
+
+    def _version(self):
+        try:
+            out = subprocess.run(self.cmd + ["--help"], capture_output=True, text=True, timeout=30, env=self._env())
+            m = re.search(r"(\d+\.\d+(?:\.\d+)?)", (out.stdout + out.stderr).splitlines()[0])
+            return m.group(1) if m else "?"
+        except (OSError, subprocess.SubprocessError, IndexError):
+            return None
+
+    def devices(self):
+        """Every way to every scanner: {"id" (None when only NAPS2 knows it), "name", "backend", "key"}."""
+        found, asked = [], False
+        scanimage = os.environ.get("READERS_SCANNER_SCANIMAGE") or shutil.which("scanimage")
+        if self.driver == "sane" and scanimage and not self.flatpak:
+            try:
+                out = subprocess.run(shlex.split(scanimage) + ["-f", "%d\t%v\t%m\t%t%n"], capture_output=True, text=True, timeout=60)
+                asked = out.returncode == 0        # SANE answered: NAPS2, which asks SANE too, would find no more
+                for line in out.stdout.splitlines():
+                    parts = line.split("\t")
+                    if len(parts) >= 3 and parts[0]:
+                        backend = parts[0].split(":")[0]
+                        model = parts[2].replace("_", " ").strip()
+                        vendor = parts[1].strip()
+                        initials = "".join(t[0] for t in re.split(r"[\s-]+", vendor) if t).lower()
+                        known = vendor in ("eSCL", "WSD", "") or model.lower().startswith((vendor.lower() + " ", initials + " "))
+                        name = model if known else f"{vendor} {model}"
+                        found.append({"id": parts[0], "name": name, "backend": backend, "key": _model_key(parts[2])})
+            except (OSError, subprocess.SubprocessError):
+                pass
+        if not found and not asked and self.cmd:
+            try:
+                out = subprocess.run(self.cmd + ["--listdevices", "--driver", self.driver], capture_output=True, text=True, timeout=90, env=self._env())
+                for line in out.stdout.splitlines():
+                    line = line.strip()
+                    if not line or any(w in line for w in ("not available", "could not", "error")):
+                        continue
+                    m = re.match(r"^(.*\S)\s+\(([^()]+)\)$", line)
+                    inner = m.group(2) if m else ""
+                    found.append({"id": inner if inner.startswith("escl:") else None, "name": line, "backend": inner.split(":")[0] or self.driver,
+                                  "key": _model_key(m.group(1) if m else line)})
+            except (OSError, subprocess.SubprocessError):
+                pass
+        rank = {b: i for i, b in enumerate(_BACKEND_ORDER)}
+        return sorted(found, key=lambda d: rank.get(d["backend"], len(rank)))
+
+    def _profile(self, device, source, pagesize, deskew):
+        os.makedirs(self.data, exist_ok=True)
+        x = lambda s: s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        xml = f"""<?xml version="1.0" encoding="utf-8"?>
+<ArrayOfScanProfile xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <ScanProfile>
+    <Version>2</Version>
+    <Device><ID>{x(device["id"])}</ID><Name>{x(device["name"])}</Name></Device>
+    <DriverName>{self.driver}</DriverName>
+    <DisplayName>readers-scanner</DisplayName>
+    <IsDefault>true</IsDefault>
+    <BitDepth>C24Bit</BitDepth>
+    <PageSize>{pagesize}</PageSize>
+    <Resolution><Dpi>{DPI}</Dpi></Resolution>
+    <PaperSource>{source.capitalize()}</PaperSource>
+    <AutoDeskew>{"true" if deskew else "false"}</AutoDeskew>
+    <Quality>{JPEG_QUALITY}</Quality>
+  </ScanProfile>
+</ArrayOfScanProfile>
+"""
+        with open(os.path.join(self.data, "profiles.xml"), "w", encoding="utf-8") as f:
+            f.write(xml)
+
+    def scan(self, device, source, pagesize, out_dir, on_page=None):
+        """One scan from one source. Returns (page files, error code or None, NAPS2's words)."""
+        os.makedirs(out_dir, exist_ok=True)
+        for f in os.listdir(out_dir):
+            os.remove(os.path.join(out_dir, f))
+        deskew = source != "glass"       # a feeder pulls sheets askew; on the glass, leave the page as laid
+        out = os.path.join(out_dir, "p$(nnnn).jpg")
+        if device.get("id") and not self.flatpak:
+            self._profile(device, source, pagesize, deskew)
+            cmd = self.cmd + ["-p", "readers-scanner"]
+        else:
+            cmd = self.cmd + ["--noprofile", "--driver", self.driver, "--device", re.sub(r"\s+\([^()]*\)$", "", device["name"]),
+                              "--source", source, "--dpi", str(DPI), "--bitdepth", "color", "--pagesize", pagesize.lower()] + (["--deskew"] if deskew else [])
+        cmd += ["-o", out, "--jpegquality", str(JPEG_QUALITY), "-f", "-v"]
+        code, said = None, ""
+        self._cancelled = False
+        try:
+            self.proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, errors="replace", env=self._env())
+            for line in self.proc.stdout:
+                line = line.strip()
+                m = re.match(r"Scanned page (\d+)", line)
+                if m and on_page:
+                    on_page(int(m.group(1)))
+                for needle, c in _ERRORS:
+                    if needle.lower() in line.lower() and code is None:
+                        code, said = c, line
+            self.proc.wait()
+        except OSError as e:
+            return [], "driver", str(e)
+        finally:
+            self.proc = None
+        if self._cancelled:
+            self._cancelled = False
+            return [], "cancelled", ""
+        files = sorted(os.path.join(out_dir, f) for f in os.listdir(out_dir) if f.lower().endswith(".jpg"))
+        if files:
+            return files, None, ""
+        return [], code or "unknown", said
+
+    def cancel(self):
+        p = self.proc
+        if p is not None:
+            self._cancelled = True
+            try:
+                p.send_signal(signal.SIGINT)
+                threading.Timer(3, lambda: p.poll() is None and p.terminate()).start()
+            except OSError:
+                pass
+
+
+def page_size_of(cfg):
+    fmt = cfg.get("format", "auto")
+    if fmt == "auto":
+        country = (locale.getlocale()[0] or os.environ.get("LANG", "") or "").split(".")[0][-2:].upper()
+        return "Letter" if country in ("US", "CA", "MX", "PH", "CL", "CO") else "A4"
+    return "Letter" if fmt == "letter" else "A4"
+
+
+def scan_pages(naps2, cfg, source, out_dir, on_page=None, on_state=None):
+    """A scan with the smart defaults: « automatic » takes the feeder when it holds paper and the
+    glass otherwise; when the scanner does not answer on one driver, the next one is tried, and
+    the scanners are looked for again once (an address may have changed). Returns a dict:
+    files, source (the one used), error (code) and detail, blank (pages left out), device."""
+    if not naps2.cmd:
+        return {"files": [], "error": "nonaps2", "detail": ""}
+    routes = list((cfg.get("device") or {}).get("routes") or [])
+    searched = False
+    if not routes:
+        on_state and on_state("searching")
+        routes = pick_routes(naps2.devices(), None)
+        searched = True
+        if not routes:
+            return {"files": [], "error": "nodevice", "detail": ""}
+    key = routes[0]["key"]
+    pagesize = page_size_of(cfg)
+    last = ("unknown", "")
+    for src in (("feeder", "glass") if source == "auto" else (source,)):
+        tries = list(routes)
+        while tries:
+            route = tries.pop(0)
+            on_state and on_state(src)
+            files, err, said = naps2.scan(route, src, pagesize, out_dir, on_page)
+            if files:
+                blank = []
+                if src == "duplex":
+                    blank = [f for f in files if is_blank(f)]
+                    if len(blank) == len(files):
+                        blank = []             # a stack of empty sheets is what was asked for
+                routes = [route] + [r for r in routes if r is not route]
+                return {"files": [f for f in files if f not in blank], "blank": blank, "source": src, "error": None,
+                        "device": {"key": key, "name": route["name"], "routes": routes}}
+            last = (err, said)
+            if err == "cancelled":
+                return {"files": [], "error": err, "detail": ""}
+            if err in ("empty", "nofeeder", "noduplex", "unknown") and src != "glass":
+                break                          # nothing in the feeder: the glass, when automatic
+            if err in ("notfound", "offline", "comm", "driver", "unknown"):
+                if not tries and not searched:
+                    on_state and on_state("searching")
+                    searched = True
+                    again = pick_routes(naps2.devices(), key)
+                    tries = [r for r in again if r.get("id") not in {x.get("id") for x in routes} or r.get("id") is None] if again else []
+                    routes = again or routes
+                continue
+            return {"files": [], "error": err, "detail": said, "source": src}
+        else:
+            if source == "auto" and src == "feeder" and last[0] in ("notfound", "offline", "comm", "driver"):
+                break                          # nobody answers: the glass would not either
+    return {"files": [], "error": last[0], "detail": last[1]}
+
+
+def pick_routes(devices, key):
+    """The ways to one scanner: the one asked for, or the first found."""
+    if not devices:
+        return []
+    key = key if key and any(d["key"] == key for d in devices) else devices[0]["key"]
+    return [d for d in devices if d["key"] == key]
+
+
+# ------------------------------------------------------------------------------------------
+# Config and the Reader's credentials file (one JSON file, one section per app; this app's
+# section is the phone's: "readers-scanner", so a file exported there sets this one up)
+# ------------------------------------------------------------------------------------------
+
+def load_config():
+    try:
+        with open(CONFIG_FILE) as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {}
+
+
+def save_config(cfg):
+    os.makedirs(CONFIG_DIR, mode=0o700, exist_ok=True)
+    tmp = CONFIG_FILE + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(cfg, f, indent=2)
+    os.chmod(tmp, 0o600)
+    os.replace(tmp, CONFIG_FILE)
+
+
+CREDENTIAL_KEYS = ("server", "folder", "username", "password")
+CREDENTIALS_FORMAT = "readers-credentials"
+# when this app's section is absent: another app's server and login (never its folder)
+CREDENTIAL_FALLBACK = {"readers-notes": "Reader's Notes", "readers-recorder": "Reader's Recorder"}
+
+
+def export_credentials(cfg, path):
+    path = os.path.expanduser(path)
+    data = {}
+    if os.path.exists(path) and os.path.getsize(path) > 0:
+        with open(path, encoding="utf-8") as f:
+            try:
+                data = json.load(f)
+            except ValueError:
+                raise ValueError(_("not a Reader's credentials file"))
+        if not isinstance(data, dict) or data.get("format") != CREDENTIALS_FORMAT:
+            raise ValueError(_("not a Reader's credentials file"))
+    data.update({"format": CREDENTIALS_FORMAT, "version": 1})
+    data[APP] = {k: cfg[k] for k in CREDENTIAL_KEYS if cfg.get(k) not in (None, "")}
+    fd = os.open(path + ".tmp", os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
+    os.replace(path + ".tmp", path)
+    return path
+
+
+def import_credentials(cfg, path):
+    with open(os.path.expanduser(path), encoding="utf-8") as f:
+        try:
+            data = json.load(f)
+        except ValueError:
+            raise ValueError(_("not a Reader's credentials file"))
+    if not isinstance(data, dict) or data.get("format") != CREDENTIALS_FORMAT:
+        raise ValueError(_("not a Reader's credentials file"))
+    section, keys, message = data.get(APP), CREDENTIAL_KEYS, _("credentials imported")
+    if not isinstance(section, dict) or not section:
+        other = next((n for n in CREDENTIAL_FALLBACK if isinstance(data.get(n), dict) and data[n].get("server")), None)
+        if other is None:
+            raise ValueError(_("this file holds nothing for %1", "Reader's Scanner"))
+        section, keys = data[other], ("server", "username", "password")
+        message = _("server and login taken from %1", CREDENTIAL_FALLBACK[other])
+    for k in keys:
+        if k in section:
+            cfg[k] = section[k]
+    return message
+
+
+def credentials_cli(argv):
+    for flag in ("--export-credentials", "--import-credentials"):
+        if flag in argv:
+            i = argv.index(flag)
+            if i + 1 >= len(argv):
+                print(f"{flag} FILE", file=sys.stderr); sys.exit(2)
+            cfg = load_config()
+            try:
+                if flag == "--export-credentials":
+                    print(_("credentials exported to %1 — the file holds your passwords: keep it private", export_credentials(cfg, argv[i + 1])))
+                else:
+                    message = import_credentials(cfg, argv[i + 1]); save_config(cfg); print(message)
+            except (OSError, ValueError) as e:
+                print(str(e), file=sys.stderr); sys.exit(1)
+            sys.exit(0)
+
+
+# ------------------------------------------------------------------------------------------
+# UI pieces
+# ------------------------------------------------------------------------------------------
+
+class Job(QtCore.QObject):
+    """Runs one job off the UI thread; `note` carries what it says on the way."""
+    done = QtCore.pyqtSignal(object)
+    failed = QtCore.pyqtSignal(str)
+    note = QtCore.pyqtSignal(object)
+
+    def __init__(self, fn):
+        super().__init__()
+        self.fn = fn
+
+    def run(self):
+        try:
+            self.done.emit(self.fn(self.note.emit))
+        except Exception as e:
+            self.failed.emit(str(e))
+
+
+class Loader(QtCore.QObject):
+    """Pictures made off the UI thread, a few at a time."""
+    loaded = QtCore.pyqtSignal(object, QtGui.QImage)
+
+    def __init__(self):
+        super().__init__()
+        self.pool = QtCore.QThreadPool()
+        self.pool.setMaxThreadCount(max(2, min(4, (os.cpu_count() or 2) - 1)))
+
+    def load(self, key, fn):
+        loader = self
+
+        class Run(QtCore.QRunnable):
+            def run(self):
+                try:
+                    img = fn()
+                except Exception:
+                    img = None
+                loader.loaded.emit(key, img if img is not None else QtGui.QImage())
+        self.pool.start(Run())
+
+
+def qimage_of(img):
+    img = img.convert("RGB")
+    data = img.tobytes()
+    return QtGui.QImage(data, img.width, img.height, img.width * 3, QtGui.QImage.Format_RGB888).copy()
+
+
+def read_scaled(path, width, rotation=0):
+    """A picture file, decoded at about the width asked (fast for JPEG), upright."""
+    r = QtGui.QImageReader(path)
+    size = r.size()
+    if rotation % 180:
+        size = size.transposed()
+    if size.isValid() and size.width() > width:
+        s = r.size()
+        f = width / size.width()
+        r.setScaledSize(QtCore.QSize(max(1, round(s.width() * f)), max(1, round(s.height() * f))))
+    img = r.read()
+    if rotation % 360 and not img.isNull():
+        img = img.transformed(QtGui.QTransform().rotate(rotation))
+    return img
+
+
+def clear(layout):
+    """Empties a layout: its widgets go at once (hidden, then deleted), not at the next idle moment."""
+    while layout.count():
+        w = layout.takeAt(0).widget()
+        if w is not None:
+            w.hide()
+            w.setParent(None)
+            w.deleteLater()
+
+
+def elide(label, text):
+    """The text on one line of the label's width, « … » in the middle of what does not fit."""
+    label.setToolTip(text)
+    label.setText(label.fontMetrics().elidedText(text, QtCore.Qt.ElideRight, max(40, label.width())))
+
+
+class Clickable(QtWidgets.QLabel):
+    clicked = QtCore.pyqtSignal()
+
+    def __init__(self, text="", name=None):
+        super().__init__(text)
+        if name:
+            self.setObjectName(name)
+        self.setCursor(QtCore.Qt.PointingHandCursor)
+
+    def mousePressEvent(self, e):
+        if e.button() == QtCore.Qt.LeftButton:
+            self.clicked.emit()
+
+
+class Flow(QtWidgets.QLayout):
+    """Widgets side by side, wrapping to the next line."""
+
+    def __init__(self, parent=None, gap=10):
+        super().__init__(parent)
+        self.items, self.gap = [], gap
+        self.setContentsMargins(0, 0, 0, 0)
+
+    def addItem(self, item):
+        self.items.append(item)
+
+    def count(self):
+        return len(self.items)
+
+    def itemAt(self, i):
+        return self.items[i] if 0 <= i < len(self.items) else None
+
+    def takeAt(self, i):
+        return self.items.pop(i) if 0 <= i < len(self.items) else None
+
+    def expandingDirections(self):
+        return QtCore.Qt.Orientations(0)
+
+    def hasHeightForWidth(self):
+        return True
+
+    def heightForWidth(self, w):
+        return self._lay(QtCore.QRect(0, 0, w, 0), False)
+
+    def setGeometry(self, rect):
+        super().setGeometry(rect)
+        self._lay(rect, True)
+
+    def sizeHint(self):
+        return self.minimumSize()
+
+    def minimumSize(self):
+        s = QtCore.QSize()
+        for it in self.items:
+            s = s.expandedTo(it.minimumSize())
+        return s
+
+    def _lay(self, rect, move):
+        x, y, line = rect.x(), rect.y(), 0
+        for it in self.items:
+            if it.widget() is not None and it.widget().isHidden():
+                continue
+            w, h = it.sizeHint().width(), it.sizeHint().height()
+            if x + w > rect.right() + 1 and line > 0:
+                x, y, line = rect.x(), y + line + self.gap, 0
+            if move:
+                it.setGeometry(QtCore.QRect(x, y, w, h))
+            x += w + self.gap
+            line = max(line, h)
+        return y + line - rect.y()
+
+
+KIND = QtCore.Qt.UserRole + 2      # a folder row: "all", "folder" or "new"
+SUB = QtCore.Qt.UserRole + 1
+NAME = QtCore.Qt.UserRole + 3
+FOLDERS = "\x00folders"            # the place: the list of folders
+
+
+class RowDelegate(QtWidgets.QStyledItemDelegate):
+    """The list: folders (a small folder, the name, the count) or documents (the name, then a
+    dim line). The chosen row is drawn inverted, like every selection in the Reader's apps."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.fg, self.bg = QtGui.QColor("#000"), QtGui.QColor("#fff")
+        self.big, self.small = QtGui.QFont(), QtGui.QFont()
+
+    def sizeHint(self, option, index):
+        fb, fs = QtGui.QFontMetrics(self.big), QtGui.QFontMetrics(self.small)
+        if index.data(KIND):
+            return QtCore.QSize(100, fb.height() + 22)
+        if index.data(QtCore.Qt.UserRole) is None:
+            return QtCore.QSize(100, fs.height() * 3 + 24)
+        return QtCore.QSize(100, fb.height() + fs.height() + 22)
+
+    def paint(self, p, option, index):
+        p.save()
+        r = option.rect.adjusted(22, 10, -22, -10)
+        sel = bool(option.state & QtWidgets.QStyle.State_Selected) and not index.data(KIND)
+        fg, bg = (self.bg, self.fg) if sel else (self.fg, self.bg)
+        p.fillRect(option.rect, bg)
+        dim = QtGui.QColor(fg)
+        dim.setAlphaF(0.6 if sel else 0.55)
+        fb, fs = QtGui.QFontMetrics(self.big), QtGui.QFontMetrics(self.small)
+        kind = index.data(KIND)
+        if kind:
+            gh = int(fb.height() * 0.62); gw = int(gh * 1.3)
+            if kind == "session":      # pages waiting to be filed: a sheet
+                p.setRenderHint(QtGui.QPainter.Antialiasing, True)
+                p.setPen(QtGui.QPen(fg, 1.6)); p.setBrush(fg)
+                sheet = QtCore.QRectF(r.left() + gw * 0.2, r.top() + (fb.height() - gh * 1.25) / 2, gw * 0.62, gh * 1.25)
+                p.drawRect(sheet)
+            else:
+                folder_glyph(p, QtCore.QRectF(r.left(), r.top() + (fb.height() - gh) // 2, gw, gh), dim if kind == "new" else fg, kind == "all", kind == "new")
+            count = index.data(SUB) or ""
+            cw = fs.horizontalAdvance(count) + 8 if count else 0
+            p.setFont(self.big)
+            p.setPen(dim if kind == "new" else fg)
+            tr = QtCore.QRect(r.left() + gw + 16, r.top(), r.width() - gw - 16 - cw, fb.height())
+            p.drawText(tr, QtCore.Qt.AlignLeft | QtCore.Qt.AlignVCenter, fb.elidedText(index.data(QtCore.Qt.DisplayRole), QtCore.Qt.ElideRight, tr.width()))
+            if count:
+                p.setFont(self.small); p.setPen(dim)
+                p.drawText(QtCore.QRect(r.right() - cw, r.top(), cw, fb.height()), QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter, count)
+        elif index.data(QtCore.Qt.UserRole) is None:      # the empty-list message
+            p.setFont(self.small)
+            p.setPen(dim)
+            p.drawText(r, QtCore.Qt.TextWordWrap | QtCore.Qt.AlignLeft | QtCore.Qt.AlignTop, index.data(QtCore.Qt.DisplayRole))
+        else:
+            p.setFont(self.big)
+            p.setPen(fg)
+            p.drawText(QtCore.QRect(r.left(), r.top(), r.width(), fb.height()), QtCore.Qt.AlignLeft | QtCore.Qt.AlignVCenter,
+                       fb.elidedText(index.data(QtCore.Qt.DisplayRole), QtCore.Qt.ElideRight, r.width()))
+            p.setFont(self.small)
+            p.setPen(dim)
+            p.drawText(QtCore.QRect(r.left(), r.top() + fb.height(), r.width(), fs.height()), QtCore.Qt.AlignLeft | QtCore.Qt.AlignVCenter,
+                       fs.elidedText(index.data(SUB) or "", QtCore.Qt.ElideRight, r.width()))
+        p.restore()
+
+
+def folder_glyph(p, rect, colour, filled, dashed):
+    """A folder, drawn small in the text's colour: tab on the top left (as on the phone)."""
+    w, h, x, y = rect.width(), rect.height(), rect.left(), rect.top()
+    tab, tw, rr = h * 0.18, w * 0.42, max(1.5, h * 0.12)
+    path = QtGui.QPainterPath()
+    path.moveTo(x + rr, y); path.lineTo(x + tw - tab * 0.4, y); path.lineTo(x + tw + tab * 0.6, y + tab)
+    path.lineTo(x + w - rr, y + tab); path.quadTo(x + w, y + tab, x + w, y + tab + rr)
+    path.lineTo(x + w, y + h - rr); path.quadTo(x + w, y + h, x + w - rr, y + h)
+    path.lineTo(x + rr, y + h); path.quadTo(x, y + h, x, y + h - rr)
+    path.lineTo(x, y + rr); path.quadTo(x, y, x + rr, y); path.closeSubpath()
+    p.setRenderHint(QtGui.QPainter.Antialiasing, True)
+    if filled:
+        p.fillPath(path, colour)
+    else:
+        pen = QtGui.QPen(colour, 1.6)
+        if dashed:
+            pen.setStyle(QtCore.Qt.DashLine)
+        p.setPen(pen); p.setBrush(QtCore.Qt.NoBrush); p.drawPath(path)
+
+
+class Picture(QtWidgets.QWidget):
+    """One page: the picture at the width it is given, a thin frame, an empty sheet until it is there."""
+
+    def __init__(self, ratio=0.707, frame="#888"):
+        super().__init__()
+        self.image, self.ratio, self.frame = None, ratio, QtGui.QColor(frame)
+        self.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed)
+
+    def set_image(self, img):
+        if img is not None and not img.isNull():
+            self.image, self.ratio = img, img.width() / max(1, img.height())
+        self.updateGeometry()
+        self.update()
+
+    def hasHeightForWidth(self):
+        return True
+
+    def heightForWidth(self, w):
+        return int(w / self.ratio)
+
+    def sizeHint(self):
+        w = self.width() or 400
+        return QtCore.QSize(w, self.heightForWidth(w))
+
+    def resizeEvent(self, e):
+        self.setFixedHeight(self.heightForWidth(self.width()))
+
+    def paintEvent(self, e):
+        p = QtGui.QPainter(self)
+        r = self.rect().adjusted(0, 0, -1, -1)
+        if self.image is not None:
+            p.setRenderHint(QtGui.QPainter.SmoothPixmapTransform, True)
+            p.drawImage(QtCore.QRectF(r), self.image)
+        p.setPen(QtGui.QPen(self.frame, 1))
+        p.drawRect(r)
+
+
+class Pages(QtWidgets.QScrollArea):
+    """A document's pages, one under the other, on a column."""
+
+    def __init__(self, loader):
+        super().__init__()
+        self.loader = loader
+        self.setWidgetResizable(True)
+        self.setFrameShape(QtWidgets.QFrame.NoFrame)
+        self.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
+        self.inner = QtWidgets.QWidget()
+        self.box = QtWidgets.QVBoxLayout(self.inner)
+        self.box.setContentsMargins(36, 22, 36, 22)
+        self.box.setSpacing(18)
+        self.box.setAlignment(QtCore.Qt.AlignHCenter | QtCore.Qt.AlignTop)
+        self.setWidget(self.inner)
+        self.pictures, self.token = [], 0
+        loader.loaded.connect(self._loaded)
+
+    def show_pages(self, sources, frame):
+        """sources: one function per page, giving its picture."""
+        self.token += 1
+        clear(self.box)
+        self.pictures = []
+        for i, fn in enumerate(sources):
+            pic = Picture(frame=frame)
+            pic.setMaximumWidth(900)
+            self.box.addWidget(pic)
+            self.pictures.append(pic)
+            if fn:
+                self.loader.load(("page", self.token, i), fn)
+        self.verticalScrollBar().setValue(0)
+
+    def _loaded(self, key, img):
+        if isinstance(key, tuple) and key[0] == "page" and key[1] == self.token and key[2] < len(self.pictures):
+            self.pictures[key[2]].set_image(img)
+
+
+class Message(QtWidgets.QWidget):
+    """The right side when there is no document: a line, a dim one under it, and what can be done."""
+    action = QtCore.pyqtSignal(str)
+
+    def __init__(self):
+        super().__init__()
+        box = QtWidgets.QVBoxLayout(self)
+        box.setContentsMargins(60, 40, 60, 40)
+        box.addStretch(2)
+        self.title = QtWidgets.QLabel("")
+        self.title.setObjectName("big")
+        self.title.setWordWrap(True)
+        self.title.setAlignment(QtCore.Qt.AlignHCenter)
+        box.addWidget(self.title)
+        self.sub = QtWidgets.QLabel("")
+        self.sub.setObjectName("dim")
+        self.sub.setWordWrap(True)
+        self.sub.setAlignment(QtCore.Qt.AlignHCenter)
+        self.sub.setOpenExternalLinks(True)
+        box.addSpacing(10)
+        box.addWidget(self.sub)
+        box.addSpacing(22)
+        self.row = QtWidgets.QHBoxLayout()
+        self.row.setSpacing(14)
+        box.addLayout(self.row)
+        box.addStretch(3)
+
+    def say(self, title, sub="", actions=()):
+        self.title.setText(title)
+        self.sub.setText(sub)
+        self.sub.setVisible(bool(sub))
+        clear(self.row)
+        self.row.addStretch(1)
+        for i, (key, label) in enumerate(actions):
+            b = QtWidgets.QPushButton(label)
+            b.setDefault(i == 0)
+            b.setCursor(QtCore.Qt.PointingHandCursor)
+            b.clicked.connect(lambda _c=False, k=key: self.action.emit(k))
+            self.row.addWidget(b)
+        self.row.addStretch(1)
+
+
+class Tile(QtWidgets.QWidget):
+    """A page in the review: the picture, and under it its number, « turn » and « ✕ »."""
+    turn = QtCore.pyqtSignal(object)
+    remove = QtCore.pyqtSignal(object)
+    earlier = QtCore.pyqtSignal(object)
+    later = QtCore.pyqtSignal(object)
+
+    WIDTH = 176
+
+    def __init__(self, page, number, frame):
+        super().__init__()
+        self.page = page
+        self.setFixedWidth(self.WIDTH)
+        box = QtWidgets.QVBoxLayout(self)
+        box.setContentsMargins(0, 0, 0, 0)
+        box.setSpacing(6)
+        self.picture = Picture(frame=frame)
+        self.picture.setFixedWidth(self.WIDTH)
+        box.addWidget(self.picture)
+        row = QtWidgets.QHBoxLayout()
+        row.setSpacing(12)
+        self.number = QtWidgets.QLabel(str(number))
+        self.number.setObjectName("dim")
+        row.addWidget(self.number)
+        row.addStretch(1)
+        for text, tip, sig in (("←", _("move earlier"), self.earlier), ("→", _("move later"), self.later), ("⟳", _("turn"), self.turn), ("✕", _("delete this page"), self.remove)):
+            c = Clickable(text, "tool")
+            c.setToolTip(tip)
+            c.clicked.connect(lambda s=sig: s.emit(self.page))
+            row.addWidget(c)
+        box.addLayout(row)
+
+
+class AddTile(Clickable):
+    """« + page »: one more page from the scanner, a dashed sheet to click."""
+
+    def __init__(self):
+        super().__init__("+ " + _("page"), "addtile")
+        self.setFixedSize(Tile.WIDTH, int(Tile.WIDTH / 0.707))
+        self.setAlignment(QtCore.Qt.AlignCenter)
+
+
+class Review(QtWidgets.QWidget):
+    """After a scan: the pages (turn, delete, reorder, one more), the look and the language of
+    the text, then a name if wanted and the folder — a click on a folder files the document."""
+    filed = QtCore.pyqtSignal(str, str)      # folder, name
+    saved = QtCore.pyqtSignal()              # the pages of an existing document
+    discarded = QtCore.pyqtSignal()
+    more = QtCore.pyqtSignal()
+    changed = QtCore.pyqtSignal()
+    keep_blank = QtCore.pyqtSignal()
+    new_folder = QtCore.pyqtSignal()
+    pick_look = QtCore.pyqtSignal()
+    pick_lang = QtCore.pyqtSignal()
+
+    def __init__(self, loader):
+        super().__init__()
+        self.loader = loader
+        self.pages, self.tiles, self.token = [], {}, 0
+        self.frame = "#888"
+        loader.loaded.connect(self._loaded)
+        box = QtWidgets.QVBoxLayout(self)
+        box.setContentsMargins(0, 0, 0, 0)
+        box.setSpacing(0)
+        head = QtWidgets.QHBoxLayout()
+        head.setContentsMargins(36, 12, 24, 12)
+        head.setSpacing(18)
+        self.count = QtWidgets.QLabel("")
+        self.count.setObjectName("dim")
+        head.addWidget(self.count)
+        self.look = Clickable("", "choice")
+        self.look.clicked.connect(self.pick_look.emit)
+        head.addWidget(self.look)
+        self.lang = Clickable("", "choice")
+        self.lang.clicked.connect(self.pick_lang.emit)
+        head.addWidget(self.lang)
+        self.blank = Clickable("", "dimlink")
+        self.blank.clicked.connect(self.keep_blank.emit)
+        head.addWidget(self.blank)
+        head.addStretch(1)
+        self.discard = Clickable(_("discard"), "dimlink")
+        self.discard.clicked.connect(self.discarded.emit)
+        head.addWidget(self.discard)
+        box.addLayout(head)
+        box.addWidget(rule())
+        self.scroll = QtWidgets.QScrollArea()
+        self.scroll.setWidgetResizable(True)
+        self.scroll.setFrameShape(QtWidgets.QFrame.NoFrame)
+        self.scroll.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
+        self.grid_host = QtWidgets.QWidget()
+        outer = QtWidgets.QVBoxLayout(self.grid_host)
+        outer.setContentsMargins(36, 22, 36, 22)
+        self.grid = Flow(gap=22)
+        outer.addLayout(self.grid)
+        outer.addStretch(1)
+        self.scroll.setWidget(self.grid_host)
+        box.addWidget(self.scroll, 1)
+        box.addWidget(rule())
+        # filing: a name if wanted, then the folder
+        self.filing = QtWidgets.QWidget()
+        f = QtWidgets.QVBoxLayout(self.filing)
+        f.setContentsMargins(36, 14, 36, 16)
+        f.setSpacing(10)
+        self.name = QtWidgets.QLineEdit()
+        self.name.setObjectName("name")
+        self.name.setPlaceholderText(_("name — optional: without one, the first words read on the page"))
+        self.name.returnPressed.connect(self.file_default)
+        f.addWidget(self.name)
+        self.folders_host = QtWidgets.QWidget()
+        self.folders = Flow(self.folders_host, gap=8)
+        f.addWidget(self.folders_host)
+        self.hint = QtWidgets.QLabel("")
+        self.hint.setObjectName("dim")
+        f.addWidget(self.hint)
+        box.addWidget(self.filing)
+        self.save_row = QtWidgets.QWidget()
+        s = QtWidgets.QHBoxLayout(self.save_row)
+        s.setContentsMargins(36, 14, 36, 16)
+        s.addStretch(1)
+        self.save = QtWidgets.QPushButton(_("save"))
+        self.save.setDefault(True)
+        self.save.clicked.connect(self.saved.emit)
+        s.addWidget(self.save)
+        box.addWidget(self.save_row)
+        self.default_folder = ""
+        self.editing = False
+
+    # the pages ------------------------------------------------------------------------
+
+    def show_session(self, pages, blank, editing, look, lang, frame):
+        self.pages, self.editing, self.frame = pages, editing, frame
+        self.filing.setVisible(not editing)
+        self.save_row.setVisible(editing)
+        self.look.setText(_("look") + ": " + look_name(look) + " ▾")
+        self.lang.setText(_("text") + ": " + LANG_NAMES.get(lang, lang) + " ▾")
+        self.blank.setVisible(bool(blank))
+        n = len(blank)
+        self.blank.setText((_("1 blank page left out") if n == 1 else _("%1 blank pages left out", n)) + " · " + (_("keep it") if n == 1 else _("keep them")))
+        self.rebuild()
+
+    def rebuild(self):
+        self.token += 1
+        clear(self.grid)
+        self.tiles = {}
+        for i, page in enumerate(self.pages):
+            t = Tile(page, i + 1, self.frame)
+            t.turn.connect(self._turn); t.remove.connect(self._remove)
+            t.earlier.connect(lambda p: self._move(p, -1)); t.later.connect(lambda p: self._move(p, 1))
+            self.grid.addWidget(t)
+            self.tiles[page["id"]] = t
+            self._load(page)
+        add = AddTile()
+        add.clicked.connect(self.more.emit)
+        self.grid.addWidget(add)
+        n = len(self.pages)
+        self.count.setText(_("1 page") if n == 1 else _("%1 pages", n))
+        self.save.setEnabled(n > 0)
+        self.grid_host.updateGeometry()
+
+    def _load(self, page):
+        src, rotation, look = page["src"], page.get("rotation", 0), page.get("look", "original")
+        key = ("tile", self.token, page["id"], rotation, look)
+        if look == "original":
+            self.loader.load(key, lambda: read_scaled(src, Tile.WIDTH * 2, rotation))
+        else:
+            self.loader.load(key, lambda: qimage_of(apply_look(open_upright(src, rotation, draft=(Tile.WIDTH * 3, Tile.WIDTH * 4)), look)))
+
+    def _loaded(self, key, img):
+        if isinstance(key, tuple) and key[0] == "tile" and key[1] == self.token:
+            t = self.tiles.get(key[2])
+            if t is not None and (t.page.get("rotation", 0), t.page.get("look", "original")) == (key[3], key[4]):
+                t.picture.set_image(img)
+
+    def _turn(self, page):
+        page["rotation"] = (page.get("rotation", 0) + 90) % 360
+        t = self.tiles.get(page["id"])
+        if t:
+            t.picture.ratio = 1 / t.picture.ratio
+            t.picture.image = None
+            t.picture.setFixedHeight(t.picture.heightForWidth(Tile.WIDTH))
+        self._load(page)
+        self.changed.emit()
+
+    def _remove(self, page):
+        self.pages.remove(page)
+        self.rebuild()
+        self.changed.emit()
+
+    def _move(self, page, by):
+        i = self.pages.index(page)
+        j = max(0, min(len(self.pages) - 1, i + by))
+        if i != j:
+            self.pages.insert(j, self.pages.pop(i))
+            self.rebuild()
+            self.changed.emit()
+
+    # the folders ----------------------------------------------------------------------
+
+    def show_folders(self, names, default):
+        self.default_folder = default if default in names else ""
+        clear(self.folders)
+        for label, folder in [(_("all scans"), "")] + [(n, n) for n in names]:
+            b = QtWidgets.QPushButton(label)
+            b.setObjectName("chip")
+            b.setCursor(QtCore.Qt.PointingHandCursor)
+            b.setDefault(folder == self.default_folder)
+            b.setAutoDefault(False)
+            b.clicked.connect(lambda _c=False, f=folder: self.filed.emit(f, self.name.text().strip()))
+            self.folders.addWidget(b)
+        b = QtWidgets.QPushButton("+ " + _("new folder"))
+        b.setObjectName("chipnew")
+        b.setCursor(QtCore.Qt.PointingHandCursor)
+        b.setAutoDefault(False)
+        b.clicked.connect(self.new_folder.emit)
+        self.folders.addWidget(b)
+        where = self.default_folder or _("all scans")
+        self.hint.setText(_("a click on a folder files the document there · Enter: « %1 »", where))
+        self.folders_host.updateGeometry()
+
+    def file_default(self):
+        if self.editing:
+            self.saved.emit()
+        elif self.pages:
+            self.filed.emit(self.default_folder, self.name.text().strip())
+
+
+def rule(vertical=False):
+    r = QtWidgets.QFrame()
+    r.setObjectName("sep")
+    r.setFixedWidth(1) if vertical else r.setFixedHeight(1)
+    return r
+
+
+def look_name(look):
+    return {"original": _("as scanned"), "clean": _("clean"), "grey": _("grey"), "bw": _("b & w")}.get(look, look)
+
+
+def source_name(source):
+    return {"auto": _("automatic"), "glass": _("glass"), "feeder": _("feeder"), "duplex": _("both sides")}.get(source, source)
+
+
+def reader_name(key):
+    return {"tesseract-fast": "Tesseract", "tesseract-best": _("Tesseract best"), "mlkit": "ML Kit (Google)"}.get(key)
+
+
+class SettingsDialog(QtWidgets.QDialog):
+    IMPORTED = 2
+
+    def __init__(self, main):
+        super().__init__(main)
+        self.main, cfg = main, main.cfg
+        self.cfg = cfg
+        self.setWindowTitle("reader's scanner")
+        outer = QtWidgets.QVBoxLayout(self)
+        outer.setContentsMargins(22, 18, 22, 18)
+        outer.setSpacing(14)
+        intro = QtWidgets.QLabel(_("A WebDAV folder shares the scans with your phone and your other computers: the same server, folder and login as in Reader's Scanner on Android. kDrive: server https://ID.connect.kdrive.infomaniak.com (the ID is the number in the kDrive web address), your Infomaniak login, and an application password if two-factor authentication is on. Nextcloud and any WebDAV server work the same way."))
+        intro.setObjectName("dim")
+        intro.setWordWrap(True)
+        outer.addWidget(intro)
+        form = QtWidgets.QFormLayout()
+        form.setSpacing(10)
+        outer.addLayout(form)
+        self.server = QtWidgets.QLineEdit(cfg.get("server", ""))
+        self.server.setPlaceholderText("https://123456.connect.kdrive.infomaniak.com")
+        self.user = QtWidgets.QLineEdit(cfg.get("username", ""))
+        self.password = QtWidgets.QLineEdit(cfg.get("password", ""))
+        self.password.setEchoMode(QtWidgets.QLineEdit.Password)
+        self.folder = QtWidgets.QLineEdit(cfg.get("folder", "Scans"))
+        form.addRow(_("server"), self.server)
+        form.addRow(_("username"), self.user)
+        form.addRow(_("password"), self.password)
+        form.addRow(_("folder on the server"), self.folder)
+        creds = QtWidgets.QHBoxLayout()
+        for text, export in ((_("import credentials…"), False), (_("export credentials…"), True)):
+            b = QtWidgets.QPushButton(text); b.setObjectName("quiet"); b.setAutoDefault(False)
+            b.clicked.connect(lambda _c=False, x=export: self.credentials(x)); creds.addWidget(b)
+        creds.addStretch(1)
+        form.addRow("", creds)
+
+        # the scanner
+        self.scanner = QtWidgets.QComboBox()
+        self.again = QtWidgets.QPushButton(_("look again")); self.again.setObjectName("quiet"); self.again.setAutoDefault(False)
+        self.again.clicked.connect(self.look_again)
+        row = QtWidgets.QHBoxLayout(); row.addWidget(self.scanner, 1); row.addWidget(self.again)
+        form.addRow(_("scanner"), row)
+        self.devices = None
+        self.fill_scanners()
+        naps = main.naps2
+        self.naps = QtWidgets.QLabel(_("NAPS2 %1 — it talks to the scanner", naps.version) if naps.cmd else
+                                     _("NAPS2 is not installed: it is required, it talks to the scanner.") + f' <a href="{NAPS2_URL}">naps2.com</a>')
+        self.naps.setObjectName("dim"); self.naps.setOpenExternalLinks(True); self.naps.setWordWrap(True)
+        form.addRow("", self.naps)
+
+        self.format = QtWidgets.QComboBox()
+        for key, label in (("auto", _("automatic (%1 here)", page_size_of({"format": "auto"}))), ("a", _("A series (A4)")), ("letter", "US Letter")):
+            self.format.addItem(label, key)
+        self.format.setCurrentIndex(max(0, self.format.findData(cfg.get("format", "auto"))))
+        form.addRow(_("page format"), self.format)
+
+        # reading
+        self.best = QtWidgets.QCheckBox(_("the most accurate models (fetched once per language, 4 to 15 MB)"))
+        self.best.setChecked(bool(cfg.get("best", True)))
+        form.addRow(_("reading"), self.best)
+        self.best_state = QtWidgets.QLabel(""); self.best_state.setObjectName("dim"); self.best_state.setWordWrap(True)
+        form.addRow("", self.best_state)
+        self.best_lang = cfg.get("lang") or default_lang()
+        self.timer = QtCore.QTimer(self, interval=400, timeout=self.show_best)
+        self.timer.start()
+        self.show_best()
+
+        self.font = QtWidgets.QComboBox()
+        for key, label in (("sans", "sans-serif"), ("serif", "serif"), ("mono", "mono")):
+            self.font.addItem(label, key)
+        self.font.setCurrentIndex(max(0, self.font.findData(cfg.get("font", "sans"))))
+        form.addRow(_("font"), self.font)
+
+        row = QtWidgets.QHBoxLayout()
+        row.addStretch(1)
+        cancel = QtWidgets.QPushButton(_("cancel")); cancel.setAutoDefault(False)
+        cancel.clicked.connect(self.reject)
+        ok = QtWidgets.QPushButton(_("save"))
+        ok.setDefault(True)
+        ok.clicked.connect(self.accept)
+        row.addWidget(cancel)
+        row.addWidget(ok)
+        outer.addLayout(row)
+        self.message = QtWidgets.QLabel(""); self.message.setObjectName("dim"); self.message.setWordWrap(True); outer.addWidget(self.message)
+        credits = QtWidgets.QLabel(f"reader's scanner {VERSION} · " + _("Pierre Gallaz · developed with Claude Code") + " · " + _("scanning by NAPS2, reading by Tesseract"))
+        credits.setObjectName("dim"); credits.setWordWrap(True)
+        outer.addWidget(credits)
+        self.resize(720, 640)
+
+    def fill_scanners(self):
+        self.scanner.clear()
+        current = self.cfg.get("device") or {}
+        if self.devices is None:
+            if current:
+                self.scanner.addItem(current.get("name", "?"), current.get("key"))
+            else:
+                self.scanner.addItem(_("none found yet"), None)
+            return
+        keys = []
+        for d in self.devices:
+            if d["key"] not in keys:
+                keys.append(d["key"])
+                self.scanner.addItem(re.sub(r"\s+\([^()]*\)$", "", d["name"]), d["key"])
+        if not keys:
+            self.scanner.addItem(_("none found — is the scanner switched on?"), None)
+        self.scanner.setCurrentIndex(max(0, self.scanner.findData(current.get("key"))))
+
+    def look_again(self):
+        self.again.setEnabled(False)
+        self.again.setText(_("looking…"))
+        self.main.run(lambda note: self.main.naps2.devices(), self.found, lambda m: self.found([]))
+
+    def found(self, devices):
+        self.devices = devices
+        self.again.setEnabled(True)
+        self.again.setText(_("look again"))
+        self.fill_scanners()
+
+    def show_best(self):
+        r, lang = self.main.reader, self.best_lang
+        name = LANG_NAMES.get(lang, lang)
+        if not r.exe():
+            self.best_state.setText(_("Tesseract is not installed: the pages are kept without their text"))
+        elif lang in r.downloading:
+            self.best_state.setText(_("%1: downloading the best model… %2 %", name, r.downloading[lang]))
+        elif r.has_best(lang):
+            self.best_state.setText(_("%1: the best model is here", name))
+        elif lang in r.system()[1]:
+            self.best_state.setText(_("%1: the system's model for now", name))
+        else:
+            self.best_state.setText(_("%1: its model will be fetched at the first reading", name))
+
+    def credentials(self, export):
+        title = _("export credentials…") if export else _("import credentials…")
+        start = os.path.expanduser("~/readers-credentials.json")
+        if export:
+            path, _f = QtWidgets.QFileDialog.getSaveFileName(self, title, start, _("Reader's credentials (*.json)"), options=QtWidgets.QFileDialog.DontConfirmOverwrite)
+        else:
+            path, _f = QtWidgets.QFileDialog.getOpenFileName(self, title, os.path.dirname(start), _("Reader's credentials (*.json)"))
+        if not path:
+            return
+        try:
+            if export:
+                self.message.setText(_("credentials exported to %1 — the file holds your passwords: keep it private", export_credentials(dict(self.cfg, **self.values()), path)))
+            else:
+                target = dict(self.cfg)
+                self.message.setText(import_credentials(target, path))
+                self.server.setText(target.get("server", "")); self.user.setText(target.get("username", ""))
+                self.password.setText(target.get("password", "")); self.folder.setText(target.get("folder", "Scans") or "Scans")
+        except (OSError, ValueError) as e:
+            self.message.setText(str(e))
+
+    def values(self):
+        v = {"server": self.server.text().strip(), "username": self.user.text().strip(), "password": self.password.text(),
+             "folder": self.folder.text().strip().strip("/") or "Scans", "font": self.font.currentData(), "format": self.format.currentData(),
+             "best": self.best.isChecked()}
+        key = self.scanner.currentData()
+        if self.devices is not None and key:
+            routes = pick_routes(self.devices, key)
+            if routes:
+                v["device"] = {"key": key, "name": routes[0]["name"], "routes": routes}
+        return v
+
+
+def pdf_page(pdf, index, cache_dir, dpi=130):
+    """Page `index` of a PDF as a picture (poppler's pdftoppm), kept beside the document."""
+    out = os.path.join(cache_dir, f"{index + 1}-{dpi}.jpg")
+    if not os.path.exists(out) or os.path.getmtime(out) < os.path.getmtime(pdf):
+        exe = shutil.which("pdftoppm")
+        if not exe:
+            return None
+        os.makedirs(cache_dir, exist_ok=True)
+        subprocess.run([exe, "-f", str(index + 1), "-l", str(index + 1), "-r", str(dpi), "-jpeg", "-singlefile", pdf, out[:-4]],
+                       capture_output=True, timeout=120)
+    return QtGui.QImage(out) if os.path.exists(out) else None
+
+
+IMPORTABLE = (".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp", ".webp", ".pdf")
+SYNC_MINUTES = 5
+
+
+class Main(QtWidgets.QMainWindow):
+    store_changed = QtCore.pyqtSignal()
+    read_progress = QtCore.pyqtSignal()
+    read_done = QtCore.pyqtSignal(str)
+
+    def __init__(self, store=None):
+        super().__init__()
+        self.cfg = load_config()
+        self.cfg.setdefault("source", "auto")
+        self.cfg.setdefault("look", "original")
+        self.cfg.setdefault("lang", default_lang())
+        self.store = store or Store(os.path.join(DATA_DIR, "scans"))
+        self.store.on_change = self.store_changed.emit          # from any thread: queued to the UI
+        self.cfg.setdefault("best", True)
+        self.reader = Reader(DATA_DIR)
+        self.reader.prefer_best = bool(self.cfg["best"])
+        self.naps2 = Naps2(DATA_DIR)
+        self.loader = Loader()
+        self.queue = ReadQueue(self.store, self.reader, on_done=self.read_done.emit, on_progress=self.read_progress.emit)
+        self.threads = []
+        self.place = FOLDERS          # the list: the folders, every document (None) or one folder
+        self.current = None           # the document on the right
+        self.session = None           # pages scanned, not filed yet
+        self.session_dir = os.path.join(DATA_DIR, "session")
+        self.scanning = False
+        self.searching = False
+        self.syncing = False
+        self.sync_again = False
+        self.downloads = {}           # document → percent
+        self.show_text = False
+        self.last_status = ""
+        self.quitting = False
+        self.setWindowTitle("reader's scanner")
+        self.setAcceptDrops(True)
+        self.resize(1180, 800)
+        self.font_size = int(self.cfg.get("font_size", 13))
+        self.dark = bool(self.cfg.get("dark", False))
+
+        central = QtWidgets.QWidget()
+        self.setCentralWidget(central)
+        outer = QtWidgets.QHBoxLayout(central)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+
+        # Left: where we are, find, the list, the three choices, « scan », the status line
+        self.left = QtWidgets.QWidget()
+        left = QtWidgets.QVBoxLayout(self.left)
+        left.setContentsMargins(0, 0, 0, 0)
+        left.setSpacing(0)
+        self.place_bar = Clickable("", "placebar")
+        self.place_bar.clicked.connect(self.to_folders)
+        left.addWidget(self.place_bar)
+        self.find = QtWidgets.QLineEdit()
+        self.find.setObjectName("find")
+        self.find.setPlaceholderText(_("find"))
+        self.find.setToolTip(_("find in names and text") + " (Ctrl+F)")
+        self.find.setClearButtonEnabled(True)
+        self.find.textChanged.connect(self.refresh_list)
+        self.find.installEventFilter(self)
+        left.addWidget(self.find)
+        self.list = QtWidgets.QListWidget()
+        self.list.setObjectName("rows")
+        self.list.setFrameShape(QtWidgets.QFrame.NoFrame)
+        self.list.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
+        self.list.setVerticalScrollMode(QtWidgets.QAbstractItemView.ScrollPerPixel)
+        self.list.setSelectionMode(QtWidgets.QAbstractItemView.ExtendedSelection)
+        self.delegate = RowDelegate(self.list)
+        self.list.setItemDelegate(self.delegate)
+        self.list.currentItemChanged.connect(self.list_moved)
+        self.list.itemClicked.connect(self.item_clicked)
+        self.list.itemActivated.connect(self.item_activated)
+        self.list.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
+        self.list.customContextMenuRequested.connect(self.list_menu)
+        left.addWidget(self.list, 1)
+        left.addWidget(rule())
+        choices = QtWidgets.QVBoxLayout()
+        choices.setContentsMargins(22, 10, 22, 10)
+        choices.setSpacing(4)
+        self.choice = {}
+        for key, pick in (("source", self.pick_source), ("look", self.pick_look), ("lang", self.pick_lang)):
+            c = Clickable("", "choice")
+            c.clicked.connect(pick)
+            choices.addWidget(c)
+            self.choice[key] = c
+        left.addLayout(choices)
+        self.scan_button = Clickable(_("scan"), "scan")
+        self.scan_button.setToolTip("Ctrl+N")
+        self.scan_button.clicked.connect(self.scan)
+        left.addWidget(self.scan_button)
+        bottom = QtWidgets.QHBoxLayout()
+        bottom.setContentsMargins(22, 8, 16, 10)
+        lines = QtWidgets.QVBoxLayout()
+        lines.setSpacing(1)
+        self.scanner_line = Clickable("", "dim")          # the scanner
+        self.scanner_line.clicked.connect(self.setup)
+        self.status = Clickable("", "dim")                # the sync
+        self.status.clicked.connect(lambda: self.sync() if self.configured() else self.setup())
+        lines.addWidget(self.scanner_line)
+        lines.addWidget(self.status)
+        bottom.addLayout(lines, 1)
+        self.gear = Clickable("⚙", "gear")
+        self.gear.setToolTip(_("settings (Ctrl+,)"))
+        self.gear.clicked.connect(self.setup)
+        bottom.addWidget(self.gear, 0)
+        left.addLayout(bottom)
+        outer.addWidget(self.left)
+        outer.addWidget(rule(vertical=True))
+
+        # Right: a message, a document, or the pages just scanned
+        self.stack = QtWidgets.QStackedWidget()
+        outer.addWidget(self.stack, 1)
+        self.message = Message()
+        self.message.action.connect(self.message_action)
+        self.stack.addWidget(self.message)
+
+        self.doc_view = QtWidgets.QWidget()
+        dv = QtWidgets.QVBoxLayout(self.doc_view)
+        dv.setContentsMargins(0, 0, 0, 0)
+        dv.setSpacing(0)
+        head = QtWidgets.QHBoxLayout()
+        head.setContentsMargins(36, 12, 24, 4)
+        self.head = QtWidgets.QLabel("")
+        self.head.setObjectName("title")
+        self.head.setTextInteractionFlags(QtCore.Qt.TextSelectableByMouse)
+        head.addWidget(self.head, 1)
+        self.more = Clickable("⋯", "more")
+        self.more.clicked.connect(self.show_menu)
+        head.addWidget(self.more, 0)
+        dv.addLayout(head)
+        self.info = QtWidgets.QLabel("")
+        self.info.setObjectName("dim")
+        self.info.setContentsMargins(36, 0, 24, 12)
+        self.info.setWordWrap(True)
+        dv.addWidget(self.info)
+        dv.addWidget(rule())
+        self.body = QtWidgets.QStackedWidget()
+        self.pages = Pages(self.loader)
+        self.body.addWidget(self.pages)
+        self.text = QtWidgets.QTextEdit()
+        self.text.setReadOnly(True)
+        self.text.setFrameShape(QtWidgets.QFrame.NoFrame)
+        self.text.setViewportMargins(36, 22, 36, 22)
+        self.body.addWidget(self.text)
+        dv.addWidget(self.body, 1)
+        dv.addWidget(rule())
+        foot = QtWidgets.QHBoxLayout()
+        foot.setContentsMargins(36, 12, 36, 14)
+        foot.setSpacing(26)
+        self.actions = {}
+        for key, label, fn in (("open", _("open the PDF"), self.open_pdf), ("save", _("save a copy…"), self.save_copy),
+                               ("copy", _("copy the text"), self.copy_text), ("text", _("text"), self.toggle_text)):
+            c = Clickable(label, "action")
+            c.clicked.connect(fn)
+            foot.addWidget(c)
+            self.actions[key] = c
+        foot.addStretch(1)
+        dv.addLayout(foot)
+        self.stack.addWidget(self.doc_view)
+
+        self.review = Review(self.loader)
+        self.review.filed.connect(self.file_session)
+        self.review.saved.connect(lambda: self.file_session(None, None))
+        self.review.discarded.connect(self.discard_session)
+        self.review.more.connect(self.scan)
+        self.review.changed.connect(self.session_changed)
+        self.review.keep_blank.connect(self.keep_blank)
+        self.review.new_folder.connect(self.file_in_new_folder)
+        self.review.pick_look.connect(self.pick_look)
+        self.review.pick_lang.connect(self.pick_lang)
+        self.stack.addWidget(self.review)
+
+        self.refresh_timer = QtCore.QTimer(self, singleShot=True, interval=0, timeout=self.after_change)
+        self.store_changed.connect(self.refresh_timer.start)
+        self.read_progress.connect(self.refresh_timer.start)
+        self.read_done.connect(self.after_read)
+        self.periodic = QtCore.QTimer(self, interval=SYNC_MINUTES * 60 * 1000, timeout=self.sync)
+        self.periodic.start()
+
+        for keys, fn in (("Ctrl+N", self.scan), ("Ctrl+O", self.import_files), ("Ctrl+F", self.focus_find), ("Ctrl+T", self.toggle_theme),
+                         ("F5", self.sync), ("Ctrl+R", self.sync), ("Ctrl+=", lambda: self.zoom(1)), ("Ctrl++", lambda: self.zoom(1)),
+                         ("Ctrl+-", lambda: self.zoom(-1)), ("Ctrl+,", self.setup), ("Escape", self.escape), ("Ctrl+Q", self.close),
+                         ("Delete", self.delete_selected), ("F2", self.rename_current)):
+            QtWidgets.QShortcut(QtGui.QKeySequence(keys), self, fn)
+
+        self.apply_style()
+        self.show_choices()
+        self.restore_session()
+        self.refresh_list()
+        if self.session:
+            self.show_review()
+        else:
+            last = self.cfg.get("last_doc")
+            if last and self.store.get(last):
+                self.open_doc(last)
+            else:
+                self.welcome()
+        self.update_status()
+        if self.configured():
+            QtCore.QTimer.singleShot(0, self.sync)
+        if self.naps2.cmd and not self.cfg.get("device"):
+            QtCore.QTimer.singleShot(0, self.find_scanner)
+
+    def configured(self):
+        return bool(self.cfg.get("server"))
+
+    # ---- look ------------------------------------------------------------------------
+
+    def colours(self):
+        return ("#000000", "#ffffff") if self.dark else ("#ffffff", "#000000")
+
+    def apply_style(self):
+        bg, fg = self.colours()
+        dim = "rgba(255,255,255,0.55)" if self.dark else "rgba(0,0,0,0.55)"
+        rl = "rgba(255,255,255,0.25)" if self.dark else "rgba(0,0,0,0.25)"
+        s = self.font_size
+        family = {"serif": "serif", "mono": "monospace"}.get(self.cfg.get("font"), "sans-serif")
+        self.setStyleSheet(f"""
+            QMainWindow, QWidget {{ background: {bg}; color: {fg}; font-family: "{family}"; font-size: {s}pt; font-weight: 300; }}
+            QLabel#dim {{ color: {dim}; }}
+            QLabel#title {{ font-size: {s + 3}pt; }}
+            QLabel#big {{ font-size: {s + 9}pt; }}
+            QLabel#more {{ font-size: {s + 5}pt; padding: 0 6px; }}
+            QLabel#gear {{ color: {dim}; font-size: {s + 3}pt; padding: 0 2px 0 8px; }}
+            QCheckBox {{ spacing: 8px; }}
+            QLabel#choice {{ color: {dim}; padding: 2px 0; }}
+            QLabel#choice:hover, QLabel#action:hover, QLabel#dimlink:hover, QLabel#tool:hover {{ color: {fg}; }}
+            QLabel#dimlink {{ color: {dim}; }}
+            QLabel#action {{ font-size: {s + 1}pt; }}
+            QLabel#tool {{ color: {dim}; font-size: {s + 2}pt; padding: 0 2px; }}
+            QLabel#addtile {{ color: {dim}; border: 1px dashed {dim}; font-size: {s + 3}pt; }}
+            QLabel#addtile:hover {{ color: {fg}; border: 1px dashed {fg}; }}
+            QLabel#scan {{ background: {fg}; color: {bg}; font-size: {s + 7}pt; padding: 26px 22px; }}
+            QLabel#scanning {{ background: {bg}; color: {fg}; font-size: {s + 7}pt; padding: 25px 21px; border: 1px solid {fg}; }}
+            QLabel#placebar {{ color: {dim}; padding: 12px 22px; border-bottom: 1px solid {rl}; }}
+            QFrame#sep {{ background: {rl}; }}
+            QLineEdit#find {{ border: none; border-bottom: 1px solid {rl}; padding: 14px 22px; }}
+            QLineEdit#name {{ border: none; border-bottom: 1px solid {rl}; padding: 8px 0; font-size: {s + 3}pt; }}
+            QListWidget#rows {{ background: {bg}; border: none; outline: none; padding: 6px 0; }}
+            QTextEdit {{ background: {bg}; color: {fg}; border: none; font-size: {s + 2}pt; selection-background-color: {fg}; selection-color: {bg}; }}
+            QScrollArea {{ border: none; }}
+            QScrollBar:vertical {{ background: {bg}; width: 6px; }} QScrollBar::handle:vertical {{ background: {rl}; min-height: 24px; }}
+            QScrollBar::add-line, QScrollBar::sub-line {{ height: 0; }} QScrollBar::add-page, QScrollBar::sub-page {{ background: {bg}; }}
+            QMenu {{ background: {bg}; color: {fg}; border: 1px solid {rl}; padding: 4px 0; }}
+            QMenu::item {{ padding: 6px 22px; }} QMenu::item:selected {{ background: {fg}; color: {bg}; }}
+            QMenu::separator {{ height: 1px; background: {rl}; margin: 4px 0; }}
+            QDialog QLineEdit, QComboBox {{ background: {bg}; color: {fg}; border: 1px solid {rl}; padding: 6px; }}
+            QComboBox QAbstractItemView {{ background: {bg}; color: {fg}; selection-background-color: {fg}; selection-color: {bg}; }}
+            QPushButton {{ background: {bg}; color: {fg}; border: 1px solid {fg}; padding: 6px 18px; }}
+            QPushButton:default {{ background: {fg}; color: {bg}; }}
+            QPushButton#quiet {{ border: none; color: {dim}; padding: 6px 4px; text-align: left; }}
+            QPushButton#chip {{ padding: 9px 18px; font-size: {s + 1}pt; }}
+            QPushButton#chip:hover {{ background: {fg}; color: {bg}; }}
+            QPushButton#chipnew {{ padding: 9px 18px; font-size: {s + 1}pt; border: 1px dashed {dim}; color: {dim}; }}
+            QToolTip {{ background: {bg}; color: {fg}; border: 1px solid {rl}; }}
+        """)
+        self.delegate.fg, self.delegate.bg = QtGui.QColor(fg), QtGui.QColor(bg)
+        big = QtGui.QFont(family)
+        big.setPointSize(s + 1)
+        big.setWeight(QtGui.QFont.Light)
+        small = QtGui.QFont(family)
+        small.setPointSize(max(8, s - 2))
+        small.setWeight(QtGui.QFont.Light)
+        self.delegate.big, self.delegate.small = big, small
+        self.left.setFixedWidth(max(300, s * 25))
+        for l in (self.scanner_line, self.status):
+            l.setFixedWidth(max(300, s * 25) - 22 - 16 - 34)
+        self.list.doItemsLayout()
+        self.list.viewport().update()
+
+    def toggle_theme(self):
+        self.dark = not self.dark
+        self.cfg["dark"] = self.dark
+        save_config(self.cfg)
+        self.apply_style()
+        self.redraw()
+
+    def zoom(self, delta):
+        self.font_size = max(9, min(24, self.font_size + delta))
+        self.cfg["font_size"] = self.font_size
+        save_config(self.cfg)
+        self.apply_style()
+
+    def redraw(self):
+        if self.stack.currentWidget() is self.review and self.session:
+            self.show_review()
+        elif self.current:
+            self.open_doc(self.current)
+
+    # ---- the three choices -------------------------------------------------------------
+
+    def show_choices(self):
+        self.choice["source"].setText(_("from") + ": " + source_name(self.cfg["source"]) + " ▾")
+        self.choice["look"].setText(_("look") + ": " + look_name(self.cfg["look"]) + " ▾")
+        self.choice["lang"].setText(_("text") + ": " + LANG_NAMES.get(self.cfg["lang"], self.cfg["lang"]) + " ▾")
+        self.choice["source"].setToolTip(_("automatic: the feeder when it holds paper, the glass otherwise"))
+        self.choice["look"].setToolTip(_("as scanned, or cleaned: white paper, grey, black and white"))
+        self.choice["lang"].setToolTip(_("the language the text is read in"))
+
+    def _pick(self, key, options, names, after=None):
+        m = QtWidgets.QMenu(self)
+        for o in options:
+            a = m.addAction(("● " if self.cfg.get(key) == o else "○ ") + names(o))
+            a.triggered.connect(lambda _c=False, v=o: self._picked(key, v, after))
+        m.exec_(QtGui.QCursor.pos())
+
+    def _picked(self, key, value, after):
+        self.cfg[key] = value
+        save_config(self.cfg)
+        self.show_choices()
+        if after:
+            after(value)
+
+    def pick_source(self):
+        self._pick("source", SOURCES, source_name)
+
+    def pick_look(self):
+        self._pick("look", LOOKS, look_name, self.look_picked)
+
+    def pick_lang(self):
+        self._pick("lang", LANGS, lambda l: LANG_NAMES[l], self.lang_picked)
+
+    def look_picked(self, look):
+        if self.session:
+            for p in self.session["pages"]:
+                p["look"] = look
+            self.session_changed()
+            if self.stack.currentWidget() is self.review:
+                self.show_review()
+
+    def lang_picked(self, lang):
+        if self.session and self.stack.currentWidget() is self.review:
+            self.show_review()
+
+    # ---- the list ----------------------------------------------------------------------
+
+    def doc_title(self, d):
+        return d.get("name") or when_label(d["created"])
+
+    def doc_sub(self, d, with_folder):
+        n = Store.page_count(d)
+        parts = [when_label(d["created"])] if d.get("name") else []
+        parts.append(_("1 page") if n == 1 else _("%1 pages", n))
+        if with_folder and d.get("folder"):
+            parts.append(d["folder"])
+        state = self.doc_state(d)
+        if state:
+            parts.append(state)
+        return " · ".join(parts)
+
+    def doc_state(self, d):
+        if d["id"] in self.queue.working:
+            w = self.queue.working[d["id"]]
+            return _("reading the text %1", w) if w else _("reading the text…")
+        if d.get("ocr") == PENDING and not d.get("remote"):
+            return _("text to be read")
+        if d.get("ocr") == FAILED and not d.get("remote"):
+            return _("text could not be read")
+        if d["id"] in self.downloads:
+            return _("downloading… %1 %", self.downloads[d["id"]])
+        return None
+
+    def refresh_list(self):
+        q = self.find.text().strip()
+        self.list.blockSignals(True)
+        chosen = {i.data(QtCore.Qt.UserRole) for i in self.list.selectedItems()} - {None}
+        self.list.clear()
+        if self.session and self.session["pages"]:
+            n = len(self.session["pages"])
+            item = QtWidgets.QListWidgetItem(_("scan not filed yet"))
+            item.setData(KIND, "session")
+            item.setData(SUB, _("1 page") if n == 1 else _("%1 pages", n))
+            self.list.addItem(item)
+        if self.place == FOLDERS and not q:
+            self.place_bar.hide()
+            rows = [("all", _("all scans"), str(self.store.count()), None)]
+            rows += [("folder", f, str(self.store.count(f)), f) for f in self.store.folder_names()]
+            rows.append(("new", "+ " + _("new folder"), "", None))
+            for kind, label, count, name in rows:
+                item = QtWidgets.QListWidgetItem(label)
+                item.setData(KIND, kind)
+                item.setData(SUB, count)
+                item.setData(NAME, name)
+                self.list.addItem(item)
+            self.list.blockSignals(False)
+            return
+        inside = self.place if self.place not in (None, FOLDERS) else None
+        self.place_bar.setText("←  " + (inside or _("all scans")))
+        self.place_bar.show()
+        if q:
+            rows = [(d, snippet) for d, snippet in self.store.search(q)]
+        else:
+            rows = [(d, None) for d in self.store.all(inside)]
+        if not rows:
+            item = QtWidgets.QListWidgetItem(_("nothing found") if q else _("no scans here yet"))
+            item.setFlags(QtCore.Qt.NoItemFlags)
+            self.list.addItem(item)
+        for d, snippet in rows:
+            item = QtWidgets.QListWidgetItem(self.doc_title(d))
+            item.setData(QtCore.Qt.UserRole, d["id"])
+            item.setData(SUB, snippet or self.doc_sub(d, inside is None))
+            self.list.addItem(item)
+            if d["id"] == self.current and self.stack.currentWidget() is self.doc_view and len(chosen) <= 1:
+                self.list.setCurrentItem(item)
+            elif d["id"] in chosen and len(chosen) > 1:
+                item.setSelected(True)
+        self.list.blockSignals(False)
+
+    def choose_row(self, doc_id):
+        """The list shows which document is open (when it is in the list)."""
+        if len(self.list.selectedItems()) > 1:
+            return
+        self.list.blockSignals(True)
+        self.list.clearSelection()
+        self.list.setCurrentRow(-1)
+        for i in range(self.list.count()):
+            if self.list.item(i).data(QtCore.Qt.UserRole) == doc_id:
+                self.list.setCurrentRow(i)
+                break
+        self.list.blockSignals(False)
+
+    def to_folders(self):
+        self.place = FOLDERS
+        self.find.blockSignals(True); self.find.clear(); self.find.blockSignals(False)
+        self.refresh_list()
+
+    def list_moved(self, item, _prev):
+        doc_id = item.data(QtCore.Qt.UserRole) if item else None
+        if doc_id and len(self.list.selectedItems()) <= 1 and (doc_id != self.current or self.stack.currentWidget() is not self.doc_view):
+            self.open_doc(doc_id)
+
+    def item_clicked(self, item):
+        kind = item.data(KIND) if item else None
+        if kind == "all":
+            self.place = None; self.refresh_list()
+        elif kind == "folder":
+            self.place = item.data(NAME); self.refresh_list()
+        elif kind == "new":
+            self.new_folder()
+        elif kind == "session":
+            self.show_review()
+        elif item is not None and item.data(QtCore.Qt.UserRole) and len(self.list.selectedItems()) <= 1:
+            if self.stack.currentWidget() is not self.doc_view or self.current != item.data(QtCore.Qt.UserRole):
+                self.open_doc(item.data(QtCore.Qt.UserRole))
+
+    def item_activated(self, item):
+        if item is not None and item.data(QtCore.Qt.UserRole):
+            self.open_pdf()           # double click, Enter: the PDF in the system's viewer
+        else:
+            self.item_clicked(item)
+
+    def selected_docs(self):
+        ids = [i.data(QtCore.Qt.UserRole) for i in self.list.selectedItems() if i.data(QtCore.Qt.UserRole)]
+        return [d for d in (self.store.get(i) for i in ids) if d]
+
+    def list_menu(self, pos):
+        item = self.list.itemAt(pos)
+        kind = item.data(KIND) if item else None
+        m = QtWidgets.QMenu(self)
+        if kind == "folder":
+            name = item.data(NAME)
+            m.addAction(_("rename…"), lambda: self.rename_folder(name))
+            m.addAction(_("delete the folder"), lambda: self.delete_folder(name))
+        elif kind in ("all", "new"):
+            m.addAction("+ " + _("new folder"), self.new_folder)
+        elif item is not None and item.data(QtCore.Qt.UserRole):
+            docs = self.selected_docs()
+            if item.data(QtCore.Qt.UserRole) not in [d["id"] for d in docs]:
+                docs = [self.store.get(item.data(QtCore.Qt.UserRole))]
+            self.doc_menu(m, [d for d in docs if d])
+        else:
+            m.addAction(_("scan"), self.scan)
+            m.addAction(_("from files…"), self.import_files)
+        m.exec_(self.list.mapToGlobal(pos))
+
+    def new_folder(self):
+        name, ok = QtWidgets.QInputDialog.getText(self, "reader's scanner", _("name of the new folder"))
+        made = self.store.add_folder(name) if ok and name.strip() else None
+        if made:
+            self.refresh_list()
+            self.sync()
+        return made
+
+    def rename_folder(self, name):
+        new, ok = QtWidgets.QInputDialog.getText(self, "reader's scanner", _("new name of the folder"), text=name)
+        if ok and new.strip() and self.store.rename_folder(name, new):
+            self.sync()
+
+    def delete_folder(self, name):
+        if QtWidgets.QMessageBox.question(self, "reader's scanner", _("Delete the folder “%1”? Its scans stay, in all scans.", name)) == QtWidgets.QMessageBox.Yes:
+            self.store.delete_folder(name)
+            if self.place == name:
+                self.place = FOLDERS
+            self.sync()
+
+    def focus_find(self):
+        self.find.setFocus()
+        self.find.selectAll()
+
+    def eventFilter(self, obj, e):
+        if obj is self.find and e.type() == QtCore.QEvent.KeyPress:
+            if e.key() == QtCore.Qt.Key_Escape:
+                self.find.clear()
+                return True
+            if e.key() in (QtCore.Qt.Key_Down, QtCore.Qt.Key_Return, QtCore.Qt.Key_Enter):
+                for i in range(self.list.count()):
+                    if self.list.item(i).data(QtCore.Qt.UserRole):
+                        self.list.setCurrentRow(i)
+                        self.list.setFocus()
+                        break
+                return True
+        return super().eventFilter(obj, e)
+
+    # ---- messages ----------------------------------------------------------------------
+
+    def say(self, title, sub="", actions=()):
+        self.message.say(title, sub, actions)
+        self.stack.setCurrentWidget(self.message)
+
+    def welcome(self):
+        self.current = None
+        if not self.naps2.cmd:
+            self.naps2_page()
+        elif self.store.count() == 0:
+            self.say(_("put the pages on the scanner, press « scan »"),
+                     _("In the feeder or on the glass: the scanner takes what it finds. The text is read on this computer, and the document becomes a PDF you can search."),
+                     (("scan", _("scan")), ("import", _("from files…"))))
+        else:
+            self.say(_("scan, or choose a document"), "", (("scan", _("scan")),))
+
+    def naps2_page(self):
+        self.say(_("Reader's Scanner needs NAPS2"),
+                 _("NAPS2 is the free program that talks to the scanner. It is installed separately, from naps2.com. Once it is there, « look again »; pictures and PDFs can be brought in from files meanwhile."),
+                 (("naps2", _("get NAPS2")), ("again", _("look again")), ("import", _("from files…"))))
+
+    def message_action(self, key):
+        if key == "scan":
+            self.scan()
+        elif key == "import":
+            self.import_files()
+        elif key == "cancel":
+            self.cancel_scan()
+        elif key == "settings":
+            self.setup()
+        elif key == "naps2":
+            QtGui.QDesktopServices.openUrl(QtCore.QUrl(NAPS2_URL))
+        elif key == "again":
+            self.naps2 = Naps2(DATA_DIR)
+            if self.naps2.cmd:
+                self.welcome()
+                if not self.cfg.get("device"):
+                    self.find_scanner()
+            else:
+                self.naps2_page()
+        elif key == "review":
+            self.show_review()
+
+    # ---- a document --------------------------------------------------------------------
+
+    def open_doc(self, doc_id):
+        d = self.store.get(doc_id)
+        if d is None:
+            self.welcome()
+            return
+        self.current = doc_id
+        self.cfg["last_doc"] = doc_id
+        self.stack.setCurrentWidget(self.doc_view)
+        self.choose_row(doc_id)
+        self.show_doc_head(d)
+        frame = "#777777"
+        n = Store.page_count(d)
+        if d.get("remote"):
+            pdf = self.store.pdf_file(doc_id)
+            if self.store.has_pdf(doc_id):
+                cache = os.path.join(self.store.dir(doc_id), "render")
+                self.pages.show_pages([(lambda i=i: pdf_page(pdf, i, cache)) for i in range(n)], frame)
+            else:
+                self.pages.show_pages([None] * n, frame)
+                self.download(d)
+        else:
+            sources = []
+            for p in d["pages"]:
+                shown = self.store.page_file(doc_id, p["id"])
+                if os.path.exists(shown):
+                    sources.append(lambda f=shown: read_scaled(f, 1100))
+                else:
+                    sources.append(lambda f=self.store.src_file(doc_id, p["id"]), r=p.get("rotation", 0): read_scaled(f, 1100, r))
+            self.pages.show_pages(sources, frame)
+        self.shown = (doc_id, d.get("rev", 0), d.get("remote") and self.store.has_pdf(doc_id), d.get("ocr"))
+        self.show_body(d)
+
+    def show_doc_head(self, d):
+        self.head.setText(self.doc_title(d))
+        n = Store.page_count(d)
+        parts = [when_label(d["created"]), _("1 page") if n == 1 else _("%1 pages", n)]
+        if d.get("folder"):
+            parts.append(d["folder"])
+        parts.append(LANG_NAMES.get(d.get("lang"), d.get("lang") or ""))
+        if reader_name(d.get("readBy")):
+            parts.append(reader_name(d.get("readBy")))
+        if d.get("remote"):
+            parts.append(_("scanned elsewhere"))
+        state = self.doc_state(d)
+        if state:
+            parts.append(state)
+        if d["id"] in self.queue.errors and d.get("ocr") == FAILED:
+            parts.append(self.queue.errors[d["id"]])
+        if d.get("remote") and not self.store.has_pdf(d["id"]) and d["id"] not in self.downloads:
+            parts.append(getattr(self, "download_error", {}).get(d["id"]) or "")
+        self.info.setText(" · ".join(p for p in parts if p))
+
+    def show_body(self, d):
+        text = [t for t in self.store.text(d["id"])]
+        self.actions["text"].setText(_("pages") if self.show_text else _("text"))
+        if self.show_text:
+            if any(t.strip() for t in text):
+                out = []
+                for i, t in enumerate(text):
+                    if len(text) > 1:
+                        out.append(f"— {i + 1} —")
+                    out.append(reflow(t))
+                self.text.setPlainText("\n\n".join(out))
+            else:
+                self.text.setPlainText(_("No text was found on these pages.") if d.get("ocr") == DONE or d.get("remote") else _("The text has not been read yet."))
+            self.body.setCurrentWidget(self.text)
+        else:
+            self.body.setCurrentWidget(self.pages)
+
+    def toggle_text(self):
+        self.show_text = not self.show_text
+        d = self.store.get(self.current) if self.current else None
+        if d:
+            self.show_body(d)
+
+    def download(self, d):
+        """The PDF of a document from elsewhere, the first time it is needed."""
+        doc_id = d["id"]
+        if doc_id in self.downloads:
+            return
+        if not self.configured():
+            self.download_error = dict(getattr(self, "download_error", {}), **{doc_id: _("its PDF needs the WebDAV folder")})
+            self.show_doc_head(d)
+            return
+        self.downloads[doc_id] = 0
+        cfg = dict(self.cfg)
+
+        def done(path):
+            self.downloads.pop(doc_id, None)
+            if not path:
+                self.download_error = dict(getattr(self, "download_error", {}), **{doc_id: _("the PDF is not on the server (any more)")})
+            self.after_change()
+
+        def failed(message):
+            self.downloads.pop(doc_id, None)
+            self.download_error = dict(getattr(self, "download_error", {}), **{doc_id: message})
+            self.after_change()
+
+        def note(pc):
+            self.downloads[doc_id] = pc
+            if self.current == doc_id:
+                now = self.store.get(doc_id)
+                now and self.show_doc_head(now)
+
+        self.run(lambda say: fetch_pdf(self.store, cfg, d, say), done, failed, note)
+
+    def the_pdf(self, d, then):
+        """Calls then(path) with the document's PDF, downloading or making it first if needed."""
+        doc_id = d["id"]
+        if self.store.has_pdf(doc_id):
+            then(self.store.pdf_file(doc_id))
+        elif d.get("remote"):
+            if not self.configured():
+                return
+            cfg = dict(self.cfg)
+            self.run(lambda say: fetch_pdf(self.store, cfg, d, None), lambda p: (self.after_change(), p and then(p)), lambda m: None)
+        else:
+            pages = [f for f in (self.store.page_file(doc_id, p["id"]) for p in d["pages"]) if os.path.exists(f)]
+            if len(pages) == len(d["pages"]) and pages:
+                self.run(lambda say: plain_pdf(pages, os.path.join(self.store.dir(doc_id), "ocr-plain.pdf")), lambda p: p and then(p), lambda m: None)
+
+    def named_copy(self, d, pdf):
+        folder = os.path.join(DATA_DIR, "share")
+        os.makedirs(folder, exist_ok=True)
+        for f in os.listdir(folder):
+            p = os.path.join(folder, f)
+            if time.time() - os.path.getmtime(p) > 86400:
+                os.remove(p)
+        out = os.path.join(folder, file_name_of(d))
+        shutil.copyfile(pdf, out)
+        return out
+
+    def open_pdf(self, docs=None):
+        for d in (docs or ([self.store.get(self.current)] if self.current else [])):
+            if d:
+                self.the_pdf(d, lambda p, d=d: QtGui.QDesktopServices.openUrl(QtCore.QUrl.fromLocalFile(self.named_copy(d, p))))
+
+    def documents_dir(self):
+        last = self.cfg.get("save_dir")
+        if last and os.path.isdir(last):
+            return last
+        return QtCore.QStandardPaths.writableLocation(QtCore.QStandardPaths.DocumentsLocation) or os.path.expanduser("~")
+
+    def save_copy(self, docs=None):
+        docs = [d for d in (docs or ([self.store.get(self.current)] if self.current else [])) if d]
+        if not docs:
+            return
+        if len(docs) == 1:
+            path, _f = QtWidgets.QFileDialog.getSaveFileName(self, _("save a copy…"), os.path.join(self.documents_dir(), file_name_of(docs[0])), "PDF (*.pdf)")
+            if not path:
+                return
+            self.cfg["save_dir"] = os.path.dirname(path)
+            self.the_pdf(docs[0], lambda p: shutil.copyfile(p, path))
+        else:
+            folder = QtWidgets.QFileDialog.getExistingDirectory(self, _("save the copies in…"), self.documents_dir())
+            if not folder:
+                return
+            self.cfg["save_dir"] = folder
+            for d in docs:
+                self.the_pdf(d, lambda p, d=d: shutil.copyfile(p, os.path.join(folder, file_name_of(d))))
+
+    def save_images(self, docs):
+        folder = QtWidgets.QFileDialog.getExistingDirectory(self, _("save the pages as pictures in…"), self.documents_dir())
+        if not folder:
+            return
+        self.cfg["save_dir"] = folder
+
+        def pictures(d, pdf=None):
+            base = file_name_of(d, "")[:-1]
+            n = Store.page_count(d)
+            for i in range(n):
+                out = os.path.join(folder, f"{base}.jpg" if n == 1 else f"{base} - {i + 1}.jpg")
+                if d.get("remote"):
+                    exe = shutil.which("pdftoppm")
+                    exe and subprocess.run([exe, "-f", str(i + 1), "-l", str(i + 1), "-r", "200", "-jpeg", "-singlefile", pdf, out[:-4]], capture_output=True, timeout=120)
+                else:
+                    src = self.store.page_file(d["id"], d["pages"][i]["id"])
+                    if os.path.exists(src):
+                        shutil.copyfile(src, out)
+                    else:
+                        render_page(self.store.src_file(d["id"], d["pages"][i]["id"]), out, d["pages"][i].get("rotation", 0), d["pages"][i].get("look", "original"))
+
+        for d in docs:
+            if d.get("remote"):
+                self.the_pdf(d, lambda p, d=d: self.run(lambda say: pictures(d, p), lambda r: None, lambda m: None))
+            else:
+                self.run(lambda say, d=d: pictures(d), lambda r: None, lambda m: None)
+
+    def text_of(self, docs):
+        out = []
+        for d in docs:
+            body = "\n\n".join(reflow(t) for t in self.store.text(d["id"]) if t.strip())
+            out.append(body if len(docs) == 1 else title_of(d) + "\n\n" + body)
+        return "\n\n\n".join(out).strip()
+
+    def copy_text(self, docs=None):
+        docs = [d for d in (docs or ([self.store.get(self.current)] if self.current else [])) if d]
+        QtWidgets.QApplication.clipboard().setText(self.text_of(docs))
+        self.flash(_("text copied"))
+
+    def flash(self, text):
+        elide(self.status, text)
+        QtCore.QTimer.singleShot(2500, self.update_status)
+
+    def doc_menu(self, m, docs):
+        one = docs[0] if len(docs) == 1 else None
+        m.addAction(_("open the PDF"), lambda: self.open_pdf(docs))
+        m.addAction(_("save a copy…"), lambda: self.save_copy(docs))
+        m.addAction(_("save the pages as pictures…"), lambda: self.save_images(docs))
+        m.addAction(_("copy the text"), lambda: self.copy_text(docs))
+        m.addSeparator()
+        if one:
+            m.addAction(_("rename…") + "\tF2", lambda: self.rename_doc(one))
+        sub = m.addMenu(_("move to"))
+        here = one.get("folder", "") if one else None
+        for label, target in [(_("no folder (all scans only)"), "")] + [(f, f) for f in self.store.folder_names()]:
+            a = sub.addAction(("● " if target == here else "○ ") + label)
+            a.triggered.connect(lambda _c=False, t=target: self.move_docs(docs, t))
+        sub.addSeparator()
+        sub.addAction("+ " + _("new folder") + "…", lambda: self.move_docs(docs, self.new_folder()))
+        if one and not one.get("remote"):
+            m.addAction(_("edit the pages"), lambda: self.edit_pages(one))
+            m.addAction(_("add pages from the scanner"), lambda: self.edit_pages(one, scan=True))
+            again = m.addMenu(_("read the text again in"))
+            for l in LANGS:
+                a = again.addAction(("● " if l == one.get("lang") else "○ ") + LANG_NAMES[l])
+                a.triggered.connect(lambda _c=False, l=l: self.read_again(one, l))
+        m.addSeparator()
+        m.addAction(_("delete") + "\tDel", lambda: self.delete_docs(docs))
+
+    def show_menu(self):
+        d = self.store.get(self.current) if self.current else None
+        if d is None:
+            return
+        m = QtWidgets.QMenu(self)
+        self.doc_menu(m, [d])
+        m.addSeparator()
+        m.addAction(_("from files…") + "\tCtrl+O", self.import_files)
+        if self.configured():
+            m.addAction(_("sync now") + "\tF5", self.sync)
+        m.addAction(_("black on white") if self.dark else _("white on black"), self.toggle_theme)
+        m.addAction(_("settings"), self.setup)
+        m.exec_(self.more.mapToGlobal(QtCore.QPoint(self.more.width() - m.sizeHint().width(), self.more.height())))
+
+    def rename_current(self):
+        d = self.store.get(self.current) if self.current and self.stack.currentWidget() is self.doc_view else None
+        if d:
+            self.rename_doc(d)
+
+    def rename_doc(self, d):
+        name, ok = QtWidgets.QInputDialog.getText(self, "reader's scanner", _("name (empty: the first words of the text)"), text=d.get("name") or "")
+        if not ok:
+            return
+        name = name.strip()
+        if not name and not d.get("remote"):
+            text = self.store.text(d["id"])
+            self.store.update(d["id"], name=first_words(next((t for t in text if t.strip()), "")), named=False, modified=now_ms())
+        else:
+            self.store.rename(d["id"], name)
+        self.sync()
+
+    def move_docs(self, docs, folder):
+        if folder is None:
+            return
+        for d in docs:
+            self.store.move(d["id"], folder)
+        self.sync()
+
+    def delete_selected(self):
+        if self.list.hasFocus() or self.stack.currentWidget() is self.doc_view:
+            docs = self.selected_docs() or ([self.store.get(self.current)] if self.current and self.stack.currentWidget() is self.doc_view else [])
+            self.delete_docs([d for d in docs if d])
+
+    def delete_docs(self, docs):
+        if not docs:
+            return
+        q = _("Delete “%1”?", self.doc_title(docs[0])) if len(docs) == 1 else _("Delete these %1 documents?", len(docs))
+        if QtWidgets.QMessageBox.question(self, "reader's scanner", q) != QtWidgets.QMessageBox.Yes:
+            return
+        for d in docs:
+            if d["id"] == self.current:
+                self.current = None
+            self.store.delete(d["id"])
+        if self.current is None:
+            self.welcome()
+        self.sync()
+
+    def read_again(self, d, lang):
+        self.store.read_again(d["id"], lang)
+        self.queue.enqueue(d["id"])
+
+    # ---- scanning ----------------------------------------------------------------------
+
+    def find_scanner(self):
+        if self.searching or not self.naps2.cmd:
+            return
+        self.searching = True
+        self.update_status()
+
+        def found(devices):
+            self.searching = False
+            routes = pick_routes(devices, None)
+            if routes:
+                self.cfg["device"] = {"key": routes[0]["key"], "name": routes[0]["name"], "routes": routes}
+                save_config(self.cfg)
+            self.update_status()
+
+        self.run(lambda say: self.naps2.devices(), found, lambda m: found([]))
+
+    def scan(self):
+        if self.scanning:
+            self.cancel_scan()
+            return
+        if not self.naps2.cmd:
+            self.naps2 = Naps2(DATA_DIR)
+            if not self.naps2.cmd:
+                self.naps2_page()
+                return
+        self.scanning = True
+        self.scan_button.setText(_("cancel"))
+        self.scan_button.setObjectName("scanning")
+        self.scan_button.setStyle(self.scan_button.style())
+        self.say(_("scanning…"), source_name(self.cfg["source"]) if self.cfg["source"] != "auto" else "", (("cancel", _("cancel")),))
+        cfg = dict(self.cfg)
+        out = os.path.join(DATA_DIR, "incoming")
+
+        def work(say):
+            r = scan_pages(self.naps2, cfg, cfg["source"], out, on_page=lambda n: say(("page", n)), on_state=lambda s: say(("state", s)))
+            if r.get("files"):
+                say(("state", "upright"))
+                r["turn"] = upright_rotations(r["files"], self.reader)
+            return r
+
+        self.run(work, self.scanned, lambda m: self.scanned({"files": [], "error": "unknown", "detail": m}), self.scan_note)
+
+    def scan_note(self, note):
+        if not self.scanning:
+            return
+        kind, value = note
+        if kind == "page":
+            self.message.title.setText(_("page %1", value))
+        elif value == "upright":
+            self.message.sub.setText(_("setting the pages upright…")); self.message.sub.setVisible(True)
+        elif value == "searching":
+            self.message.title.setText(_("scanning…"))
+            self.message.sub.setText(_("looking for the scanner…")); self.message.sub.setVisible(True)
+        else:
+            self.message.title.setText(_("scanning…"))
+            self.message.sub.setText({"feeder": _("from the feeder"), "glass": _("from the glass"), "duplex": _("both sides")}.get(value, "")); self.message.sub.setVisible(True)
+
+    def cancel_scan(self):
+        if self.scanning:
+            self.naps2.cancel()
+
+    def scan_over(self):
+        self.scanning = False
+        self.scan_button.setText(_("scan"))
+        self.scan_button.setObjectName("scan")
+        self.scan_button.setStyle(self.scan_button.style())
+
+    def scanned(self, result):
+        self.scan_over()
+        if result.get("device"):
+            self.cfg["device"] = result["device"]
+            save_config(self.cfg)
+            self.update_status()
+        if result.get("error"):
+            self.scan_failed(result["error"], result.get("detail", ""))
+            return
+        self.add_pages(result["files"], result.get("blank", []), result.get("turn"))
+
+    def scan_failed(self, code, detail):
+        if code == "nonaps2":
+            self.naps2_page()
+            return
+        has = bool(self.session and self.session["pages"])
+        if code == "cancelled":
+            if has:
+                self.show_review()
+            elif self.current and self.store.get(self.current):
+                self.open_doc(self.current)
+            else:
+                self.welcome()
+            return
+        hints = {"empty": _("Put the pages in the feeder, or choose « glass »."),
+                 "nodevice": _("Switch the scanner on and check its cable; then scan again."),
+                 "notfound": _("Switch the scanner on and check its cable; then scan again."),
+                 "offline": _("Switch the scanner on and check its cable; then scan again.")}
+        actions = [("scan", _("scan again"))]
+        if has:
+            actions.append(("review", _("back to the pages")))
+        actions.append(("import", _("from files…")))
+        self.say(error_text(code, detail), hints.get(code, detail if detail and detail != error_text(code, detail) else ""), actions)
+
+    # ---- the pages just scanned ----------------------------------------------------------
+
+    def session_file(self):
+        return os.path.join(self.session_dir, "session.json")
+
+    def save_session(self):
+        if self.session is None:
+            shutil.rmtree(self.session_dir, ignore_errors=True)
+            return
+        os.makedirs(self.session_dir, exist_ok=True)
+        with open(self.session_file() + ".tmp", "w", encoding="utf-8") as f:
+            json.dump(self.session, f)
+        os.replace(self.session_file() + ".tmp", self.session_file())
+
+    def restore_session(self):
+        """Pages scanned and not filed when the app was closed are still there."""
+        try:
+            with open(self.session_file(), encoding="utf-8") as f:
+                s = json.load(f)
+            s["pages"] = [p for p in s["pages"] if os.path.exists(p["src"])]
+            s["blank"] = [p for p in s.get("blank", []) if os.path.exists(p["src"])]
+            if s["pages"] and (not s.get("doc") or self.store.get(s["doc"])):
+                self.session = s
+        except (OSError, ValueError, KeyError):
+            pass
+        if self.session is None:
+            shutil.rmtree(self.session_dir, ignore_errors=True)
+
+    def new_session(self, doc=None):
+        shutil.rmtree(self.session_dir, ignore_errors=True)
+        os.makedirs(self.session_dir, exist_ok=True)
+        self.session = {"doc": doc, "pages": [], "blank": [], "created": now_ms()}
+
+    def add_pages(self, files, blank=(), turn=None):
+        if self.session is None:
+            self.new_session()
+        os.makedirs(self.session_dir, exist_ok=True)
+        look = self.session["pages"][0].get("look") if self.session["pages"] else self.cfg["look"]
+        for f in list(files) + list(blank):
+            pid = new_id()[:8]
+            dst = os.path.join(self.session_dir, pid + ".jpg")
+            shutil.move(f, dst)
+            page = {"id": pid, "src": dst, "rotation": (turn or {}).get(f, 0), "look": look}
+            (self.session["blank"] if f in blank else self.session["pages"]).append(page)
+        self.save_session()
+        self.show_review()
+        self.refresh_list()
+
+    def show_review(self):
+        s = self.session
+        if s is None:
+            self.welcome()
+            return
+        look = s["pages"][0].get("look", "original") if s["pages"] else self.cfg["look"]
+        lang = self.cfg["lang"]
+        self.review.show_session(s["pages"], s["blank"], bool(s.get("doc")), look, lang, "#777777")
+        default = self.place if self.place not in (None, FOLDERS) else (self.cfg.get("last_folder") or "")
+        self.review.show_folders(self.store.folder_names(), default)
+        self.stack.setCurrentWidget(self.review)
+        self.list.blockSignals(True); self.list.clearSelection(); self.list.setCurrentRow(-1); self.list.blockSignals(False)
+        if s.get("doc"):
+            self.review.save.setFocus()
+        else:
+            self.review.name.setFocus()
+
+    def session_changed(self):
+        if self.session is not None and not self.session["pages"] and not self.session["blank"]:
+            self.discard_session(ask=False)
+            return
+        self.save_session()
+        self.refresh_list()
+
+    def keep_blank(self):
+        if self.session:
+            self.session["pages"] += self.session["blank"]
+            self.session["blank"] = []
+            self.save_session()
+            self.show_review()
+
+    def discard_session(self, ask=True):
+        s = self.session
+        if s is None:
+            return
+        n = len(s["pages"])
+        if ask and n and not s.get("doc"):
+            q = _("Discard this page?") if n == 1 else _("Discard these %1 pages?", n)
+            if QtWidgets.QMessageBox.question(self, "reader's scanner", q) != QtWidgets.QMessageBox.Yes:
+                return
+        doc = s.get("doc")
+        self.session = None
+        self.save_session()
+        self.refresh_list()
+        if doc and self.store.get(doc):
+            self.open_doc(doc)
+        elif self.current and self.store.get(self.current):
+            self.open_doc(self.current)
+        else:
+            self.welcome()
+
+    def file_in_new_folder(self):
+        made = self.new_folder()
+        if made and self.session and self.session["pages"]:
+            self.file_session(made, self.review.name.text().strip())
+        elif made:
+            self.show_review()
+
+    def file_session(self, folder, name):
+        """Files the pages: a new document in `folder`, named or to be named by its text; or the
+        new pages of the document being edited. The text is read afterwards."""
+        s = self.session
+        if s is None or not s["pages"]:
+            return
+        old = self.store.get(s["doc"]) if s.get("doc") else None
+        doc_id = old["id"] if old else new_id()
+        os.makedirs(self.store.dir(doc_id), exist_ok=True)
+        pages = []
+        for p in s["pages"]:
+            pid = new_id()[:8]
+            shutil.move(p["src"], self.store.src_file(doc_id, pid))
+            pages.append({"id": pid, "rotation": p.get("rotation", 0), "look": p.get("look", "original")})
+        now = now_ms()
+        if old:
+            doc = dict(old, pages=pages, lang=self.cfg["lang"], ocr=PENDING, rev=old.get("rev", 0) + 1, modified=now)
+            if not old.get("named"):
+                doc["name"] = None
+        else:
+            doc = {"id": doc_id, "created": s.get("created") or now, "modified": now, "name": name or None, "named": bool(name),
+                   "folder": folder or "", "lang": self.cfg["lang"], "pages": pages, "ocr": PENDING, "rev": 0, "readBy": "", "remote": False, "pageCount": 0}
+            self.cfg["last_folder"] = folder or ""
+            self.place = folder if folder else None
+        self.session = None
+        self.save_session()
+        self.review.name.clear()
+        self.store.put(doc)
+        save_config(self.cfg)
+        self.queue.enqueue(doc_id)
+        self.show_text = False
+        self.open_doc(doc_id)
+        self.refresh_list()
+
+    def edit_pages(self, d, scan=False):
+        if self.session and self.session["pages"] and self.session.get("doc") != d["id"]:
+            self.show_review()         # one thing at a time: the scan not filed yet comes first
+            return
+        self.new_session(doc=d["id"])
+        for p in d["pages"]:
+            pid = new_id()[:8]
+            dst = os.path.join(self.session_dir, pid + ".jpg")
+            shutil.copyfile(self.store.src_file(d["id"], p["id"]), dst)
+            self.session["pages"].append({"id": pid, "src": dst, "rotation": p.get("rotation", 0), "look": p.get("look", "original")})
+        self.save_session()
+        self.show_review()
+        self.refresh_list()
+        if scan:
+            self.scan()
+
+    # ---- from files ----------------------------------------------------------------------
+
+    def import_files(self, paths=None):
+        if not paths:
+            paths, _f = QtWidgets.QFileDialog.getOpenFileNames(self, _("from files…"), self.documents_dir(),
+                                                               _("Pictures and PDFs") + " (" + " ".join("*" + e for e in IMPORTABLE) + ")")
+        paths = [p for p in paths or [] if p.lower().endswith(IMPORTABLE)]
+        if not paths:
+            return
+        out = os.path.join(DATA_DIR, "incoming")
+        self.say(_("bringing the pages in…"))
+
+        def work(say):
+            shutil.rmtree(out, ignore_errors=True)
+            os.makedirs(out)
+            files = []
+            for p in paths:
+                if p.lower().endswith(".pdf"):
+                    exe = shutil.which("pdftoppm")
+                    if not exe:
+                        raise RuntimeError(_("poppler-utils is needed to read a PDF"))
+                    base = os.path.join(out, f"f{len(files):04d}")
+                    subprocess.run([exe, "-r", str(DPI), "-jpeg", "-jpegopt", "quality=88", p, base], capture_output=True, timeout=600)
+                    files += sorted(os.path.join(out, f) for f in os.listdir(out) if f.startswith(os.path.basename(base)))
+                else:
+                    dst = os.path.join(out, f"f{len(files):04d}.jpg")
+                    import_image(p, dst)
+                    files.append(dst)
+            return files, upright_rotations(files, self.reader)
+
+        def done(result):
+            files, turn = result
+            if files:
+                self.add_pages(files, turn=turn)
+            else:
+                self.say(_("nothing could be read in these files"), "", (("import", _("from files…")),))
+
+        self.run(work, done, lambda m: self.say(_("nothing could be read in these files"), m, (("import", _("from files…")),)))
+
+    def dragEnterEvent(self, e):
+        if any(u.toLocalFile().lower().endswith(IMPORTABLE) for u in e.mimeData().urls()):
+            e.acceptProposedAction()
+
+    def dropEvent(self, e):
+        self.import_files([u.toLocalFile() for u in e.mimeData().urls()])
+
+    def escape(self):
+        if self.scanning:
+            self.cancel_scan()
+        elif self.find.text():
+            self.find.clear()
+        elif self.stack.currentWidget() is self.review:
+            self.discard_session()
+        elif self.place != FOLDERS:
+            self.to_folders()
+
+    # ---- changes, sync -------------------------------------------------------------------
+
+    def after_change(self):
+        """The store changed (the text was read, a sync brought the other side): redraw."""
+        self.refresh_list()
+        if self.stack.currentWidget() is self.doc_view and self.current:
+            d = self.store.get(self.current)
+            if d is None:
+                self.welcome()
+                return
+            state = (d["id"], d.get("rev", 0), d.get("remote") and self.store.has_pdf(d["id"]), d.get("ocr"))
+            if state != getattr(self, "shown", None):
+                self.open_doc(d["id"])
+            else:
+                self.show_doc_head(d)
+        elif self.stack.currentWidget() is self.review and self.session:
+            self.review.show_folders(self.store.folder_names(), self.review.default_folder)
+
+    def after_read(self, doc_id):
+        self.after_change()
+        self.sync()
+
+    def run(self, fn, on_done, on_failed, on_note=None):
+        thread = QtCore.QThread(self)
+        job = Job(fn)
+        job.moveToThread(thread)
+        thread.started.connect(job.run)
+        job.done.connect(on_done)
+        job.failed.connect(on_failed)
+        if on_note:
+            job.note.connect(on_note)
+        job.done.connect(thread.quit)
+        job.failed.connect(thread.quit)
+        pair = (thread, job)      # kept alive until the thread ends: a collected job never runs
+        thread.finished.connect(lambda: self.threads.remove(pair) if pair in self.threads else None)
+        self.threads.append(pair)
+        thread.start()
+
+    def ensure_pdf(self, d):
+        if self.store.has_pdf(d["id"]):
+            return self.store.pdf_file(d["id"])
+        pages = [self.store.page_file(d["id"], p["id"]) for p in d.get("pages", [])]
+        if pages and all(os.path.exists(p) for p in pages):
+            return plain_pdf(pages, self.store.pdf_file(d["id"]))
+        return None
+
+    def sync(self):
+        if not self.configured():
+            self.update_status()
+            return
+        if self.syncing:
+            self.sync_again = True
+            return
+        self.syncing = True
+        self.update_status()
+        cfg = dict(self.cfg)
+        self.run(lambda say: sync_run(self.store, cfg, self.ensure_pdf), self.synced, self.sync_failed)
+
+    def synced(self, result):
+        self.syncing = False
+        up, down, deleted = result
+        arrows = "".join(f" {n}{a}" for n, a in ((up, "↑"), (down, "↓"), (deleted, "−")) if n)
+        self.last_status = _("synced %1", datetime.now().strftime("%H:%M")) + arrows
+        self.update_status()
+        if self.sync_again:
+            self.sync_again = False
+            self.sync()
+
+    def sync_failed(self, message):
+        self.syncing = False
+        self.sync_again = False
+        self.last_status = message
+        self.update_status()
+
+    def update_status(self):
+        device = (self.cfg.get("device") or {}).get("name")
+        if not self.naps2.cmd:
+            scanner = _("NAPS2 is not installed")
+        elif self.searching:
+            scanner = _("looking for the scanner…")
+        elif device:
+            scanner = re.sub(r"\s+\([^()]*\)$", "", device)
+        else:
+            scanner = _("no scanner found yet")
+        if self.syncing:
+            sync = _("syncing…")
+        elif not self.configured():
+            sync = _("on this computer only")
+        else:
+            sync = self.last_status
+        elide(self.scanner_line, scanner)
+        elide(self.status, sync)
+        if not self.configured():
+            self.status.setToolTip(_("Ctrl+, to set up a WebDAV folder shared with the phone"))
+
+    def setup(self):
+        dlg = SettingsDialog(self)
+        if dlg.exec_() != QtWidgets.QDialog.Accepted:
+            return
+        v = dlg.values()
+        moved = (v["server"].rstrip("/"), v["folder"]) != (self.cfg.get("server", "").rstrip("/"), self.cfg.get("folder", "Scans"))
+        if moved and self.cfg.get("server"):
+            self.store.forget_server()
+        self.cfg.update(v)
+        save_config(self.cfg)
+        self.reader.prefer_best = bool(self.cfg.get("best", True))
+        self.last_status = ""
+        self.apply_style()
+        self.refresh_list()
+        self.update_status()
+        self.sync()
+
+    # ---- window ------------------------------------------------------------------------
+
+    def closeEvent(self, e):
+        """What was scanned is finished before leaving: the text read, the PDF sent."""
+        if self.quitting:
+            e.accept()
+            return
+        e.ignore()
+        self.quitting = True
+        if self.scanning:
+            self.cancel_scan()
+        save_config(self.cfg)
+        self.hide()
+        self.deadline = time.time() + 180
+        self.leave_timer = QtCore.QTimer(self, interval=300, timeout=self.leave)
+        self.leave_timer.start()
+        self.leave_synced = False
+
+    def leave(self):
+        busy = not self.queue.idle() or self.syncing or any(t.isRunning() for t, _j in self.threads)
+        if busy and time.time() < self.deadline:
+            return
+        if not self.leave_synced and self.configured() and time.time() < self.deadline:
+            self.leave_synced = True
+            self.sync()
+            return
+        self.leave_timer.stop()
+        QtWidgets.QApplication.quit()
+
+
+def _icon():
+    here = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
+    for name in (APP + ".png", os.path.join("packaging", APP + ".png")):
+        path = os.path.join(here, name)
+        if os.path.exists(path):
+            return QtGui.QIcon(path)
+    return QtGui.QIcon.fromTheme(APP)
+
+
+def main():
+    credentials_cli(sys.argv)
+    try:
+        locale.setlocale(locale.LC_TIME, "")
+    except locale.Error:
+        pass
+    app = QtWidgets.QApplication(sys.argv)
+    app.setApplicationName("reader's scanner")
+    app.setDesktopFileName(APP)
+    app.setWindowIcon(_icon())
+    app.setQuitOnLastWindowClosed(False)
+    w = Main()
+    w.show()
+    sys.exit(app.exec_())
+
+
+if __name__ == "__main__":
+    main()

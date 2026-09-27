@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Reader's Scanner
+Comment=Scan with one click, searchable PDFs filed in folders shared with the phone (needs NAPS2)
+Comment[fr]=Scanner en un clic, PDF où l'on peut chercher, rangés dans les dossiers du téléphone (requiert NAPS2)
+Comment[de]=Scannen mit einem Klick, durchsuchbare PDFs in den Ordnern des Telefons (benötigt NAPS2)
+Exec=readers-scanner
+Icon=readers-scanner
+Terminal=false
+Categories=Office;Scanning;Graphics;Qt;
+Keywords=scan;scanner;pdf;ocr;webdav;kdrive;nextcloud;naps2;
