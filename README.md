@@ -11,14 +11,15 @@
 > misbehaves, [say so](https://github.com/funkypitt/readers-scanner-desktop/issues).
 
 One window, one button. Put the sheets in the feeder or a page on the glass, press **scan**, press
-**Enter**: a searchable PDF, dated and named after its first words, filed in the folders you share
+**Enter**: a searchable PDF, dated and named by you, filed in the folders you share
 with [Reader's Scanner](https://github.com/funkypitt/readers-scanner) on the phone. Black and white,
 no account with the app, nothing leaves your computer except to your own WebDAV folder.
 
 ## Key points
 
 - **Two actions for a document**: *scan* (or Ctrl+N), then Enter — or a click on the folder it
-  belongs to. A name is optional: without one, the first words read on the page.
+  belongs to. The name field has the keyboard as the pages arrive: type the document's name,
+  or leave it to its date.
 - **Nothing to set up for a scan, and nothing to choose.** The scanner is found by itself and
   remembered; of the ways to reach it, the app takes the best one that answers — the scanner
   itself before any driver, the cable before the network — and the next one when it stops

@@ -201,3 +201,13 @@ What Windows taught, all of it true of the app and not only of the tests:
   .exe, which would unpack 200 MB at every start.
 - The tests' places and drivers: `READERS_SCANNER_HOME`, `READERS_SCANNER_DRIVER`,
   `READERS_SCANNER_TESSERACT`, `READERS_SCANNER_NAPS2`, `READERS_SCANNER_SCANIMAGE`.
+
+## 1.0.1 (2026-09-27): the name is asked for, not made
+
+The user, after the first real documents: « the automatic name was not a great idea » (a heading
+skipped, a line of a table taken). No name is made from the text any more, here and on the
+phone (1.1.2). The name field already had the keyboard when the pages arrive; its words now
+ask for the name (« name this document — or leave it to its date »). A document nobody names
+is called by its date, and its file is `2026-09-27 19h51.pdf`; two of the same minute become
+`… (2).pdf` on the server. Emptying the name in « rename » leaves the date alone. Documents
+named by 1.0.0 keep their name. `first_words` and its tests are gone.

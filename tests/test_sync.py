@@ -98,7 +98,7 @@ try:
     a1 = A.scan(["facture-1.jpg", "facture-2.jpg"], folder="Factures")
     stamp = rs.stamp_of(A.store.get(a1)["created"])
     r = A.sync()
-    check("a scan goes up: dated, named after its first words, in its folder", r == (1, 0, 0) and there() == [f"Factures/{stamp} Facture d'électricité.pdf"], f"{r} {there()}")
+    check("a scan nobody named goes up under its date, in its folder", r == (1, 0, 0) and there() == [f"Factures/{stamp}.pdf"], f"{r} {there()}")
     m = described().get(a1) or {}
     check("with its description: text of both pages, the name not chosen by hand", m.get("format") == "readers-scanner" and m.get("pages") == 2 and len(m.get("text", [])) == 2
           and "106,37 CHF" in m["text"][0] and m.get("named") is False and m.get("folder") == "Factures" and m.get("pdf") == there()[0], str(m)[:300])
@@ -106,7 +106,7 @@ try:
 
     r = B.sync()
     d = B.store.get(a1)
-    check("the other computer receives it: name, folder, number of pages", r == (0, 1, 0) and d and d["remote"] and d["name"] == "Facture d'électricité" and d["folder"] == "Factures"
+    check("the other computer receives it: name, folder, number of pages", r == (0, 1, 0) and d and d["remote"] and d["name"] is None and rs.title_of(d) == stamp and d["folder"] == "Factures"
           and rs.Store.page_count(d) == 2 and "Factures" in B.store.folder_names(), f"{r} {d}")
     check("found by its words before its PDF has come down", [x[0]["id"] for x in B.store.search("consommation DECOMPTE electricite")] == [a1] and not B.store.has_pdf(a1))
     got = rs.fetch_pdf(B.store, CFG, d)
@@ -171,6 +171,12 @@ try:
     B.sync()
     s2 = rs.stamp_of(t)
     check("two documents of the same minute and name: both kept", f"{s2} Bail.pdf" in there() and f"{s2} Bail (2).pdf" in there(), str(there()))
+    u1 = B.scan(["contrat.jpg"], created=t + 2)
+    u2 = B.scan(["contrat.jpg"], created=t + 3)
+    B.sync()
+    check("two documents of the same minute that nobody named: both kept", f"{s2}.pdf" in there() and f"{s2} (2).pdf" in there(), str(there()))
+    B.store.delete(u1), B.store.delete(u2)
+    B.sync()
     check("and the numbering does not drift at the next syncs", B.sync() == (0, 0, 0) and A.sync() == (0, 2, 0) and A.sync() == (0, 0, 0) and len(there()) == 3, str(there()))
 
     # someone's own file in the folder

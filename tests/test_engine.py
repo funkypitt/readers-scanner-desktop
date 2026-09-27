@@ -50,10 +50,6 @@ def log():
 
 
 # --- names ---------------------------------------------------------------------------------
-check("first words of a letter", rs.first_words("Swisscom SA\nFacture septembre 2026\nMonsieur,") == "Swisscom SA Facture septembre 2026")
-check("debris lines skipped", rs.first_words("| ~ — ! . ,\n~~ i |\nAssurance maladie\nDécompte de prestations") == "Assurance maladie Décompte")
-check("cyrillic", rs.first_words("Договор аренды квартиры\n№ 12") == "Договор аренды квартиры")
-check("nothing readable", rs.first_words("| | ~ . , ;\n\n") is None)
 d = {"created": 1790423589298, "name": "Facture: d'électricité / 2026"}
 check("file name safe, dated", rs.file_name_of(d) == rs.stamp_of(d["created"]) + " Facture d'électricité 2026.pdf", rs.file_name_of(d))
 check("folder name", rs.folder_name_of("  Impôts / 2026. ") == "Impôts 2026" and rs.folder_name_of(" .. ") is None)
@@ -340,10 +336,10 @@ def wait(doc_id, seconds=120):
     return store.get(doc_id), time.time() - t0
 
 
-a = file_doc(["facture-1.jpg", "facture-2.jpg"])
+a = file_doc(["facture-1.jpg", "facture-2.jpg"], name="Facture d'électricité")
 d, took = wait(a)
 text = store.text(a)
-check(f"two pages read ({took:.1f} s), named after their first words", d["ocr"] == rs.DONE and d["name"] == "Facture d'électricité" and d["named"] is False, str(d.get("name")))
+check(f"two pages read ({took:.1f} s), the name given kept", d["ocr"] == rs.DONE and d["name"] == "Facture d'électricité" and d["named"] is True, str(d.get("name")))
 check("the text of each page, the accents right", len(text) == 2 and "106,37 CHF" in text[0] and "décompte" in text[0] and "salutations" in text[1], str(text)[:200])
 check("the most accurate model is used by itself: figures and small words right", d["readBy"] == "tesseract-best" and "TVA 8,1 % : 7,97 CHF" in text[0] and "412 kWh" in text[0] and "1er juillet" in text[0], text[0])
 pdf = store.pdf_file(a)
@@ -377,7 +373,9 @@ store.delete(ru)
 
 c = file_doc(["upside-down.jpg"], look="clean")
 d, _t = wait(c)
-check("turned and cleaned before reading", d["ocr"] == rs.DONE and "Note de frais" in store.text(c)[0] and d["name"] == "Note de frais", str(store.text(c)))
+check("turned and cleaned before reading", d["ocr"] == rs.DONE and "Note de frais" in store.text(c)[0], str(store.text(c)))
+check("a document nobody named is called by its date, whatever was read on it", d["name"] is None and d["named"] is False and rs.title_of(d) == rs.stamp_of(d["created"])
+      and rs.file_name_of(d) == rs.stamp_of(d["created"]) + ".pdf", str(d))
 
 e = file_doc(["blank.jpg"])
 d, _t = wait(e)
@@ -391,7 +389,7 @@ check("read again in another language", d["ocr"] == rs.DONE and d["lang"] == "en
 reader.prefer_best = False
 g = file_doc(["contrat.jpg"])
 d, _t = wait(g)
-check("the accurate models switched off: the system's model reads", d["ocr"] == rs.DONE and d["readBy"] == "tesseract-fast" and d["name"] == "Contrat de bail", str(d))
+check("the accurate models switched off: the system's model reads", d["ocr"] == rs.DONE and d["readBy"] == "tesseract-fast" and "Contrat de bail" in store.text(g)[0], str(d))
 store.delete(g)
 reader.prefer_best = True
 

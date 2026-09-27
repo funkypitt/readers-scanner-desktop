@@ -131,18 +131,21 @@ expected = {"fr": "fra", "de": "deu", "es": "spa", "pt": "por", "ru": "rus", "en
 check("the text is read in the system's language unless told otherwise", w.cfg["lang"] == expected, w.cfg["lang"])
 w.cfg["lang"] = "fra"; w.show_choices()          # the test's pages are French letters
 
-# ---- 2. the shortest way: scan, Enter ------------------------------------------------------
+# ---- 2. scan, a name, Enter -------------------------------------------------------------------
 clicks = 0
 click(w.scan_button)
 check("scanning is said, « scan » becomes « cancel »", w.scanning and w.scan_button.text() == _("cancel"))
 check("two pages arrive in the review", wait(lambda: w.stack.currentWidget() is w.review and len(w.session["pages"]) == 2, 30))
 check("the name field has the keyboard", wait(lambda: w.review.name.hasFocus(), 3))
+check("and asks for the document's name", w.review.name.placeholderText() == _("name this document — or leave it to its date") and w.review.name.text() == "")
+w.review.name.insert("Facture d'électricité")          # typed
 shot(w, "02-review")
 QtTest.QTest.keyClick(w.review.name, QtCore.Qt.Key_Return); clicks += 1
 check("Enter files it: the document is open, its pages shown", w.stack.currentWidget() is w.doc_view and w.current and len(w.pages.pictures) == 2)
-check("a document in two actions (scan, Enter)", clicks == 2, str(clicks))
+check("a document in two actions and its name (scan, the name typed, Enter)", clicks == 2, str(clicks))
 doc1 = w.current
-check("read and named by itself", wait(lambda: w.store.get(doc1)["ocr"] == rs.DONE and w.head.text() == "Facture d'électricité", 90) and w.store.get(doc1)["name"] == "Facture d'électricité", w.head.text())
+check("it bears the name given, at once; then it is read", w.head.text() == "Facture d'électricité" and w.store.get(doc1)["named"]
+      and wait(lambda: w.store.get(doc1)["ocr"] == rs.DONE, 90) and w.store.get(doc1)["name"] == "Facture d'électricité", w.head.text())
 wait(lambda: all(p.image is not None for p in w.pages.pictures), 10)
 shot(w, "03-document")
 check("the list is on « all scans », the document chosen", w.place is None and rows(w)[0][1] == "Facture d'électricité" and w.list.currentItem().text() == "Facture d'électricité", str(rows(w)))
@@ -160,13 +163,14 @@ scanner(glass="facture-2.jpg")
 add = [w.review.grid.itemAt(i).widget() for i in range(w.review.grid.count())][-1]
 click(add)
 check("« + page »: a second page from the glass", wait(lambda: w.stack.currentWidget() is w.review and len(w.session["pages"]) == 2, 30))
+w.review.name.insert("Contrat de bail")          # typed
 answers["text"] = ["Logement"]
 click(chip(w, "+ " + _("new folder")))
 doc2 = w.current
 check("a new folder made while filing: the document is in it", w.store.get(doc2)["folder"] == "Logement" and w.place == "Logement" and w.stack.currentWidget() is w.doc_view)
-check("three clicks and a folder name", clicks == 3, str(clicks))
+check("three clicks, a name and a folder name", clicks == 3, str(clicks))
 wait(lambda: w.store.get(doc2)["ocr"] == rs.DONE, 60)
-check("named « Contrat de bail »", w.store.get(doc2)["name"] == "Contrat de bail", str(w.store.get(doc2)["name"]))
+check("named as typed", w.store.get(doc2)["name"] == "Contrat de bail" and w.store.get(doc2)["named"], str(w.store.get(doc2)["name"]))
 
 # ---- 4. both sides, blank backs, upside down, the review's tools ---------------------------
 w.cfg["source"] = "duplex"; w.show_choices()
@@ -233,7 +237,9 @@ w.rename_doc(w.store.get(doc2))
 check("rename", w.store.get(doc2)["name"] == "Bail 2026" and w.store.get(doc2)["named"])
 answers["text"] = [""]
 w.rename_doc(w.store.get(doc2))
-check("an emptied name gives the first words back", w.store.get(doc2)["name"] == "Contrat de bail" and not w.store.get(doc2)["named"], str(w.store.get(doc2)["name"]))
+check("an emptied name leaves the date alone", w.store.get(doc2)["name"] is None and not w.store.get(doc2)["named"] and w.doc_title(w.store.get(doc2)) == rs.when_label(w.store.get(doc2)["created"]), str(w.store.get(doc2)["name"]))
+answers["text"] = ["Contrat de bail"]
+w.rename_doc(w.store.get(doc2))
 w.move_docs([w.store.get(doc1)], "Logement")
 check("move", w.store.get(doc1)["folder"] == "Logement" and w.store.count("Logement") == 3)
 answers["text"] = ["Maison"]
@@ -304,7 +310,8 @@ w.message_action("import")
 check("from files, without NAPS2: a picture and a two-page PDF → three pages", wait(lambda: w.stack.currentWidget() is w.review and w.session and len(w.session["pages"]) == 3, 60))
 QtTest.QTest.keyClick(w.review.name, QtCore.Qt.Key_Return)
 doc4 = w.current
-check("filed and read like a scan", wait(lambda: w.store.get(doc4)["ocr"] == rs.DONE, 90) and w.store.get(doc4)["name"] == "Contrat de bail")
+check("filed and read like a scan; nobody named it: its date", wait(lambda: w.store.get(doc4)["ocr"] == rs.DONE, 90) and w.store.get(doc4)["name"] is None
+      and "Contrat de bail" in w.store.text(doc4)[0] and w.head.text() == rs.when_label(w.store.get(doc4)["created"]), w.head.text())
 os.environ["READERS_SCANNER_NAPS2"] = f"{PY} {HERE}/fake_naps2.py"
 scanner(glass="facture-1.jpg")
 w.message_action("again")
@@ -329,8 +336,7 @@ click(w.scan_button)
 check("scan: both sheets in the review", wait(lambda: w.stack.currentWidget() is w.review and w.session and len(w.session["pages"]) == 2, 30))
 QtTest.QTest.keyClick(w.review.name, QtCore.Qt.Key_Return)
 doc6 = w.current
-check("Enter: filed, read, named — the same document as through NAPS2", wait(lambda: w.store.get(doc6)["ocr"] == rs.DONE and w.head.text() == "Facture d'électricité", 90)
-      and w.store.text(doc6) == w.store.text(doc1), w.head.text())
+check("Enter: filed and read — the same text as through NAPS2", wait(lambda: w.store.get(doc6)["ocr"] == rs.DONE, 90) and w.store.text(doc6) == w.store.text(doc1), w.head.text())
 scanner(feeder=["facture-1.jpg"], flags=["jam"])
 click(w.scan_button)
 check("a paper jam: said as the scanner says it", wait(lambda: not w.scanning, 20) and w.message.title.text() == _("paper jam in the scanner"), w.message.title.text())

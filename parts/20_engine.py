@@ -490,7 +490,7 @@ def upright_rotations(files, reader):
 
 class ReadQueue:
     """Reads filed documents one at a time, off the UI thread: makes the pages as shown, reads
-    them, names the document after its first words. Documents still waiting when the app was
+    them. Documents still waiting when the app was
     closed are taken up again at the next start."""
 
     def __init__(self, store, reader, on_done=None, on_progress=None):
@@ -549,8 +549,7 @@ class ReadQueue:
                 copies.append(reading_copy(f, p.get("look", "original"), f"{base}-{i}.jpg"))
             text, layers, read_by = self.reader.read(copies, doc.get("lang", "eng"), base, lambda i, n: self._say(doc_id, f"{i}/{n}"))
             self.errors.pop(doc_id, None)
-            named = doc if doc.get("named") else dict(doc, name=first_words(next((t for t in text if t.strip()), "")) or doc.get("name"))
-            if not self.store.ocr_done(doc_id, rev, text, write_pdf(pages, base + ".pdf", title_of(named), layers), read_by):
+            if not self.store.ocr_done(doc_id, rev, text, write_pdf(pages, base + ".pdf", title_of(doc), layers), read_by):
                 self.q.put(doc_id)     # its pages changed meanwhile: read again
         except ReadError as e:
             self.errors[doc_id] = str(e)

@@ -30,7 +30,7 @@ from PIL import Image
 from PyQt5 import QtCore, QtGui, QtWidgets
 
 APP = "readers-scanner"
-VERSION = "1.0.0"
+VERSION = "1.0.1"
 Image.MAX_IMAGE_PIXELS = 200_000_000      # an A3 page at 600 dpi is not an attack
 
 
@@ -151,7 +151,7 @@ _T = {
  "delete this page": ("supprimer cette page", "diese Seite löschen", "eliminar esta página", "eliminar esta página", "удалить эту страницу"),
  "page": ("page", "Seite", "página", "página", "страница"),
  "discard": ("abandonner", "verwerfen", "descartar", "descartar", "отменить"),
- "name — optional: without one, the first words read on the page": ("nom — facultatif : sans nom, les premiers mots lus sur la page", "Name — freiwillig: ohne Namen die ersten gelesenen Wörter der Seite", "nombre — opcional: sin nombre, las primeras palabras leídas en la página", "nome — opcional: sem nome, as primeiras palavras lidas na página", "название — необязательно: без него — первые слова страницы"),
+ "name this document — or leave it to its date": ("nommer ce document — ou le laisser à sa date", "dieses Dokument benennen — oder es bei seinem Datum lassen", "nombrar este documento — o dejarlo con su fecha", "dar um nome a este documento — ou deixá-lo com a data", "назвать документ — или оставить дату"),
  "save": ("enregistrer", "speichern", "guardar", "guardar", "сохранить"),
  "look": ("aspect", "Aussehen", "aspecto", "aspeto", "вид"),
  "text": ("texte", "Text", "texto", "texto", "текст"),
@@ -253,7 +253,7 @@ _T = {
  "black on white": ("noir sur blanc", "schwarz auf weiss", "negro sobre blanco", "preto sobre branco", "чёрное на белом"),
  "white on black": ("blanc sur noir", "weiss auf schwarz", "blanco sobre negro", "branco sobre preto", "белое на чёрном"),
  "settings": ("réglages", "Einstellungen", "ajustes", "definições", "настройки"),
- "name (empty: the first words of the text)": ("nom (vide : les premiers mots du texte)", "Name (leer: die ersten Wörter des Textes)", "nombre (vacío: las primeras palabras del texto)", "nome (vazio: as primeiras palavras do texto)", "название (пусто — первые слова текста)"),
+ "name (empty: the date alone)": ("nom (vide : la date seule)", "Name (leer: nur das Datum)", "nombre (vacío: solo la fecha)", "nome (vazio: só a data)", "название (пусто: только дата)"),
  "Delete “%1”?": ("Supprimer « %1 » ?", "„%1“ löschen?", "¿Eliminar «%1»?", "Eliminar «%1»?", "Удалить «%1»?"),
  "Delete these %1 documents?": ("Supprimer ces %1 documents ?", "Diese %1 Dokumente löschen?", "¿Eliminar estos %1 documentos?", "Eliminar estes %1 documentos?", "Удалить эти документы (%1)?"),
  "scanning…": ("scan en cours…", "scannt…", "escaneando…", "a digitalizar…", "сканирование…"),
@@ -276,16 +276,16 @@ _T = {
  "no scanner found yet": ("pas encore de scanner", "noch kein Scanner gefunden", "aún sin escáner", "ainda sem digitalizador", "сканер пока не найден"),
  "the scanner is getting ready…": ("le scanner se prépare…", "der Scanner macht sich bereit…", "el escáner se prepara…", "o digitalizador prepara-se…", "сканер готовится…"),
  "an error — see errors.log": ("erreur — voir errors.log", "Fehler — siehe errors.log", "error — ver errors.log", "erro — ver errors.log", "ошибка — см. errors.log"),
- "no scanner found": ("aucun scanner trouvé", "kein scanner gefunden", "ningún escáner encontrado", "nenhum digitalizador encontrado", "сканер не найден"),
+ "no scanner found": ("aucun scanner trouvé", "kein Scanner gefunden", "ningún escáner encontrado", "nenhum digitalizador encontrado", "сканер не найден"),
  "Most scanners made since 2015 (AirScan, Mopria) are found by themselves, on the network or by USB: is yours switched on? The others need NAPS2, a free program installed separately, from naps2.com. Pictures and PDFs can be brought in from files meanwhile.":
     ("La plupart des scanners fabriqués depuis 2015 (AirScan, Mopria) sont trouvés d'eux-mêmes, sur le réseau ou par USB : le vôtre est-il allumé ? Les autres ont besoin de NAPS2, un programme libre qui s'installe à part, depuis naps2.com. En attendant, des images et des PDF peuvent être repris depuis des fichiers.",
-     "Die meisten scanner seit 2015 (AirScan, Mopria) werden von selbst gefunden, im netz oder über USB: ist ihrer eingeschaltet? Die anderen brauchen NAPS2, ein freies programm, das getrennt installiert wird, von naps2.com. Inzwischen lassen sich bilder und PDFs aus dateien übernehmen.",
+     "Die meisten Scanner seit 2015 (AirScan, Mopria) werden von selbst gefunden, im Netz oder über USB: ist Ihrer eingeschaltet? Die anderen brauchen NAPS2, ein freies Programm, das getrennt installiert wird, von naps2.com. Inzwischen lassen sich Bilder und PDFs aus Dateien übernehmen.",
      "La mayoría de los escáneres fabricados desde 2015 (AirScan, Mopria) se encuentran solos, en la red o por USB: ¿está encendido el suyo? Los demás necesitan NAPS2, un programa libre que se instala aparte, desde naps2.com. Mientras tanto se pueden traer imágenes y PDF desde archivos.",
      "A maior parte dos digitalizadores fabricados desde 2015 (AirScan, Mopria) é encontrada por si, na rede ou por USB: o seu está ligado? Os outros precisam do NAPS2, um programa livre instalado à parte, a partir de naps2.com. Entretanto podem trazer-se imagens e PDF de ficheiros.",
      "Большинство сканеров, выпущенных с 2015 года (AirScan, Mopria), находятся сами, в сети или по USB: ваш включён? Остальным нужен NAPS2 — свободная программа, которая устанавливается отдельно, с naps2.com. Пока можно взять изображения и PDF из файлов."),
- "NAPS2 %1 is here, for the scanners that do not answer by themselves": ("NAPS2 %1 est là, pour les scanners qui ne répondent pas d'eux-mêmes", "NAPS2 %1 ist da, für scanner, die nicht von selbst antworten", "NAPS2 %1 está aquí, para los escáneres que no responden solos", "NAPS2 %1 está cá, para os digitalizadores que não respondem por si", "NAPS2 %1 установлен — для сканеров, которые не отвечают сами"),
- "NAPS2 is not installed: only the scanners that do not answer by themselves (AirScan) need it.": ("NAPS2 n'est pas installé : seuls les scanners qui ne répondent pas d'eux-mêmes (AirScan) en ont besoin.", "NAPS2 ist nicht installiert: nur scanner, die nicht von selbst antworten (AirScan), brauchen es.", "NAPS2 no está instalado: solo lo necesitan los escáneres que no responden solos (AirScan).", "O NAPS2 não está instalado: só os digitalizadores que não respondem por si (AirScan) precisam dele.", "NAPS2 не установлен: он нужен только сканерам, которые не отвечают сами (AirScan)."),
- "two sheets went in together": ("deux feuilles sont passées ensemble", "zwei blätter wurden zusammen eingezogen", "dos hojas entraron juntas", "duas folhas entraram juntas", "два листа прошли вместе"),
+ "NAPS2 %1 is here, for the scanners that do not answer by themselves": ("NAPS2 %1 est là, pour les scanners qui ne répondent pas d'eux-mêmes", "NAPS2 %1 ist da, für Scanner, die nicht von selbst antworten", "NAPS2 %1 está aquí, para los escáneres que no responden solos", "NAPS2 %1 está cá, para os digitalizadores que não respondem por si", "NAPS2 %1 установлен — для сканеров, которые не отвечают сами"),
+ "NAPS2 is not installed: only the scanners that do not answer by themselves (AirScan) need it.": ("NAPS2 n'est pas installé : seuls les scanners qui ne répondent pas d'eux-mêmes (AirScan) en ont besoin.", "NAPS2 ist nicht installiert: nur Scanner, die nicht von selbst antworten (AirScan), brauchen es.", "NAPS2 no está instalado: solo lo necesitan los escáneres que no responden solos (AirScan).", "O NAPS2 não está instalado: só os digitalizadores que não respondem por si (AirScan) precisam dele.", "NAPS2 не установлен: он нужен только сканерам, которые не отвечают сами (AirScan)."),
+ "two sheets went in together": ("deux feuilles sont passées ensemble", "zwei Blätter wurden zusammen eingezogen", "dos hojas entraron juntas", "duas folhas entraram juntas", "два листа прошли вместе"),
  "syncing…": ("synchronisation…", "synchronisiert…", "sincronizando…", "a sincronizar…", "синхронизация…"),
  "on this computer only": ("sur cet ordinateur seulement", "nur auf diesem Computer", "solo en este ordenador", "só neste computador", "только на этом компьютере"),
  "Ctrl+, to set up a WebDAV folder shared with the phone": ("Ctrl+, pour configurer un dossier WebDAV partagé avec le téléphone", "Strg+, um einen mit dem Telefon geteilten WebDAV-Ordner einzurichten", "Ctrl+, para configurar una carpeta WebDAV compartida con el teléfono", "Ctrl+, para configurar uma pasta WebDAV partilhada com o telemóvel", "Ctrl+, — настроить папку WebDAV, общую с телефоном"),
@@ -316,7 +316,6 @@ def _(key, *args):
 # ------------------------------------------------------------------------------------------
 
 _BAD = re.compile(r'[\\/:*?"<>|\x00-\x1f\x7f]')
-_WORD = re.compile(r"[^\W_][^\W_'’.\-]*(?:['’.\-]+[^\W_]+)*")
 
 
 def folder_name_of(name):
@@ -336,36 +335,6 @@ def title_of(doc):
 
 def file_name_of(doc, ext="pdf"):
     return re.sub(r"\s+", " ", _BAD.sub(" ", title_of(doc))).strip()[:120] + "." + ext
-
-
-def _is_word(t):
-    letters = sum(c.isalpha() for c in t)
-    digits = sum(c.isdigit() for c in t)
-    return (letters >= 2 and letters * 10 >= len(t) * 6) or (digits >= 2 and letters == 0 and len(t) <= 10)
-
-
-def first_words(text, most=5, most_chars=40):
-    """The name a document gets from its text when the user gave none: the first few real
-    words of the page, whole lines until there are three, debris lines skipped."""
-    words, full = [], False
-    for line in text.splitlines():
-        tokens = [m.group(0).strip(".-'’") for m in _WORD.finditer(line)]
-        tokens = [t for t in tokens if t]
-        good = [t for t in tokens if _is_word(t)]
-        if not good or len(good) * 2 < len(tokens):
-            if words:
-                break
-            continue
-        for t in good:
-            if len(words) >= most or len(" ".join(words)) + len(t) + 1 > most_chars:
-                full = True
-                break
-            words.append(t)
-        if full or len(words) >= 3:
-            break
-    while len(words) > 1 and len(words[-1]) <= 3 and words[-1].islower():
-        words.pop()
-    return " ".join(words) or None
 
 
 def fold(s):
@@ -703,8 +672,6 @@ class Store:
             self._set_text(doc_id, pages)
             if pdf:
                 replace(pdf, self.pdf_file(doc_id))
-            if not d.get("named"):
-                d["name"] = first_words(next((p for p in pages if p.strip()), "")) or d.get("name")
             d.update(ocr=DONE, readBy=read_by)
             self._save()
             return True
@@ -2159,7 +2126,7 @@ def upright_rotations(files, reader):
 
 class ReadQueue:
     """Reads filed documents one at a time, off the UI thread: makes the pages as shown, reads
-    them, names the document after its first words. Documents still waiting when the app was
+    them. Documents still waiting when the app was
     closed are taken up again at the next start."""
 
     def __init__(self, store, reader, on_done=None, on_progress=None):
@@ -2218,8 +2185,7 @@ class ReadQueue:
                 copies.append(reading_copy(f, p.get("look", "original"), f"{base}-{i}.jpg"))
             text, layers, read_by = self.reader.read(copies, doc.get("lang", "eng"), base, lambda i, n: self._say(doc_id, f"{i}/{n}"))
             self.errors.pop(doc_id, None)
-            named = doc if doc.get("named") else dict(doc, name=first_words(next((t for t in text if t.strip()), "")) or doc.get("name"))
-            if not self.store.ocr_done(doc_id, rev, text, write_pdf(pages, base + ".pdf", title_of(named), layers), read_by):
+            if not self.store.ocr_done(doc_id, rev, text, write_pdf(pages, base + ".pdf", title_of(doc), layers), read_by):
                 self.q.put(doc_id)     # its pages changed meanwhile: read again
         except ReadError as e:
             self.errors[doc_id] = str(e)
@@ -3585,7 +3551,7 @@ class Review(QtWidgets.QWidget):
         f.setSpacing(10)
         self.name = QtWidgets.QLineEdit()
         self.name.setObjectName("name")
-        self.name.setPlaceholderText(_("name — optional: without one, the first words read on the page"))
+        self.name.setPlaceholderText(_("name this document — or leave it to its date"))
         self.name.returnPressed.connect(self.file_default)
         f.addWidget(self.name)
         self.folders_host = QtWidgets.QWidget()
@@ -4708,15 +4674,10 @@ class Main(QtWidgets.QMainWindow):
             self.rename_doc(d)
 
     def rename_doc(self, d):
-        name, ok = QtWidgets.QInputDialog.getText(self, "reader's scanner", _("name (empty: the first words of the text)"), text=d.get("name") or "")
+        name, ok = QtWidgets.QInputDialog.getText(self, "reader's scanner", _("name (empty: the date alone)"), text=d.get("name") or "")
         if not ok:
             return
-        name = name.strip()
-        if not name and not d.get("remote"):
-            text = self.store.text(d["id"])
-            self.store.update(d["id"], name=first_words(next((t for t in text if t.strip()), "")), named=False, modified=now_ms())
-        else:
-            self.store.rename(d["id"], name)
+        self.store.rename(d["id"], name.strip())
         self.sync()
 
     def move_docs(self, docs, folder):

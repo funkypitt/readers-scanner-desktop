@@ -820,15 +820,10 @@ class Main(QtWidgets.QMainWindow):
             self.rename_doc(d)
 
     def rename_doc(self, d):
-        name, ok = QtWidgets.QInputDialog.getText(self, "reader's scanner", _("name (empty: the first words of the text)"), text=d.get("name") or "")
+        name, ok = QtWidgets.QInputDialog.getText(self, "reader's scanner", _("name (empty: the date alone)"), text=d.get("name") or "")
         if not ok:
             return
-        name = name.strip()
-        if not name and not d.get("remote"):
-            text = self.store.text(d["id"])
-            self.store.update(d["id"], name=first_words(next((t for t in text if t.strip()), "")), named=False, modified=now_ms())
-        else:
-            self.store.rename(d["id"], name)
+        self.store.rename(d["id"], name.strip())
         self.sync()
 
     def move_docs(self, docs, folder):

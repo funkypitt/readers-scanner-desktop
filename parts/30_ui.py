@@ -548,7 +548,7 @@ class Review(QtWidgets.QWidget):
         f.setSpacing(10)
         self.name = QtWidgets.QLineEdit()
         self.name.setObjectName("name")
-        self.name.setPlaceholderText(_("name — optional: without one, the first words read on the page"))
+        self.name.setPlaceholderText(_("name this document — or leave it to its date"))
         self.name.returnPressed.connect(self.file_default)
         f.addWidget(self.name)
         self.folders_host = QtWidgets.QWidget()

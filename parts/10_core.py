@@ -11,7 +11,6 @@ def _(key, *args):
 # ------------------------------------------------------------------------------------------
 
 _BAD = re.compile(r'[\\/:*?"<>|\x00-\x1f\x7f]')
-_WORD = re.compile(r"[^\W_][^\W_'’.\-]*(?:['’.\-]+[^\W_]+)*")
 
 
 def folder_name_of(name):
@@ -31,36 +30,6 @@ def title_of(doc):
 
 def file_name_of(doc, ext="pdf"):
     return re.sub(r"\s+", " ", _BAD.sub(" ", title_of(doc))).strip()[:120] + "." + ext
-
-
-def _is_word(t):
-    letters = sum(c.isalpha() for c in t)
-    digits = sum(c.isdigit() for c in t)
-    return (letters >= 2 and letters * 10 >= len(t) * 6) or (digits >= 2 and letters == 0 and len(t) <= 10)
-
-
-def first_words(text, most=5, most_chars=40):
-    """The name a document gets from its text when the user gave none: the first few real
-    words of the page, whole lines until there are three, debris lines skipped."""
-    words, full = [], False
-    for line in text.splitlines():
-        tokens = [m.group(0).strip(".-'’") for m in _WORD.finditer(line)]
-        tokens = [t for t in tokens if t]
-        good = [t for t in tokens if _is_word(t)]
-        if not good or len(good) * 2 < len(tokens):
-            if words:
-                break
-            continue
-        for t in good:
-            if len(words) >= most or len(" ".join(words)) + len(t) + 1 > most_chars:
-                full = True
-                break
-            words.append(t)
-        if full or len(words) >= 3:
-            break
-    while len(words) > 1 and len(words[-1]) <= 3 and words[-1].islower():
-        words.pop()
-    return " ".join(words) or None
 
 
 def fold(s):
@@ -398,8 +367,6 @@ class Store:
             self._set_text(doc_id, pages)
             if pdf:
                 replace(pdf, self.pdf_file(doc_id))
-            if not d.get("named"):
-                d["name"] = first_words(next((p for p in pages if p.strip()), "")) or d.get("name")
             d.update(ocr=DONE, readBy=read_by)
             self._save()
             return True
