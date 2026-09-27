@@ -103,7 +103,13 @@ jobs:
           pdftotext -v 2>&1 | head -1
           python tests/test_engine.py
           python tests/test_sync.py
-          python tests/test_ui.py shots
+          TEST_TRACE=trail.txt python -X faulthandler tests/test_ui.py shots || {
+            code=$?
+            echo "the window tests left with $code; the app's last steps:"; tail -40 trail.txt
+            echo "and without a screen:"
+            QT_QPA_PLATFORM=offscreen python -X faulthandler tests/test_ui.py shots-offscreen | grep -v "^ok" || true
+            exit $code
+          }
 
       - name: The window as the tests saw it
         if: always()

@@ -51,6 +51,17 @@ def scanner(feeder=(), glass=None, flags=()):
                     "airscan:e0:HP ScanJet Pro 4500 fn1 (USB)\teSCL\tHP ScanJet Pro 4500 fn1 (USB)\tip=127.0.0.1\n")
 
 
+QtCore.qInstallMessageHandler(lambda kind, where, words: print(f"     Qt says: {words}"))
+if os.environ.get("TEST_TRACE"):       # which function of the app was running when the process died
+    trail = open(os.environ["TEST_TRACE"], "w", encoding="utf-8", buffering=1)
+
+    def trace(frame, event, arg):
+        if event == "call" and frame.f_code.co_filename.endswith("readers_scanner.py"):
+            trail.write(f"{time.time():.3f} {frame.f_code.co_name}:{frame.f_lineno}\n")
+        return None
+    import threading
+    sys.settrace(trace)
+    threading.settrace(trace)
 app = QtWidgets.QApplication(sys.argv)
 
 
