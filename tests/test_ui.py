@@ -374,7 +374,7 @@ settle(300)
 sys.excepthook = before
 log_file = os.path.join(rs.DATA_DIR, "errors.log")
 check("an error nobody caught: written down, said, and the app goes on", os.path.exists(log_file) and "ZeroDivisionError" in open(log_file, encoding="utf-8").read()
-      and w.status.text().startswith(_("something went wrong")[:12]) and w.isVisible(), w.status.text())
+      and w.status.text() == _("an error — see errors.log") and w.isVisible(), w.status.text())
 w.trouble = ""; w.update_status()
 
 # ---- 9. leaving ------------------------------------------------------------------------------

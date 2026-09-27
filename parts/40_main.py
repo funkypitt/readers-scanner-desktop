@@ -1435,7 +1435,7 @@ def unexpected(kind, error, trace):
         pass
     for w in QtWidgets.QApplication.topLevelWidgets() if QtWidgets.QApplication.instance() else ():
         if isinstance(w, Main):
-            w.trouble = _("something went wrong — see errors.log")
+            w.trouble = _("an error — see errors.log")
             w.status.setToolTip(os.path.join(DATA_DIR, "errors.log"))
             QtCore.QTimer.singleShot(0, w.update_status)
 
