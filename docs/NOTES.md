@@ -211,3 +211,12 @@ ask for the name (« name this document — or leave it to its date »). A docum
 is called by its date, and its file is `2026-09-27 19h51.pdf`; two of the same minute become
 `… (2).pdf` on the server. Emptying the name in « rename » leaves the date alone. Documents
 named by 1.0.0 keep their name. `first_words` and its tests are gone.
+
+## 1.0.2 (2026-09-28): the settings window takes the size of its content
+
+The settings opened at 720 × 640 pixels whatever the text size and the language, and Qt counts
+a wrapped text for fewer lines than it takes: the fields were squeezed, more so once a message
+came under the buttons. The content is now laid on `scrolling_page(window)` and the window
+sized by `Fit(window, chars, page)`: width in characters, height asked of the layout at that
+width, again when a text changes, the screen as the limit and scrolling beyond. No dialog is
+given a size in pixels any more.
