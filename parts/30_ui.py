@@ -716,8 +716,10 @@ class Fit(QtCore.QObject):
 
     def eventFilter(self, obj, event):
         kind = event.type()
-        if (obj is self.window and kind == QtCore.QEvent.Show) or (obj is self.page and kind == QtCore.QEvent.LayoutRequest):
+        if obj is self.window and kind == QtCore.QEvent.Show:
             self.fit()
+        elif obj is self.page and kind == QtCore.QEvent.LayoutRequest and self.window.isVisible():
+            self.fit()          # a text changed: Qt has refreshed the layout's sizes before telling
         return False
 
     def fit(self):
@@ -725,8 +727,12 @@ class Fit(QtCore.QObject):
         w.ensurePolished()
         for child in w.findChildren(QtWidgets.QWidget):
             child.ensurePolished()      # the sizes of the style sheet, known before the first show
-        lay.invalidate()
         shown = w.isVisible()
+        if not shown:
+            lay.invalidate()    # sizes cached before the style sheet was applied. Qt answers with a
+            # LayoutRequest once the window is shown; fitting again on it would invalidate again,
+            # and the window would fit itself without end (the main thread spinning, and on GNOME
+            # Wayland the GTK file dialog never getting its turn to draw: an invisible window).
         screen = QtWidgets.QApplication.screenAt(w.geometry().center()) if shown else None
         room = (screen or QtWidgets.QApplication.primaryScreen()).availableGeometry().size() - QtCore.QSize(40, 80)
         width = max(self.chars * w.fontMetrics().averageCharWidth(), lay.totalMinimumSize().width(), w.width() if shown else 0)

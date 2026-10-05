@@ -220,3 +220,14 @@ came under the buttons. The content is now laid on `scrolling_page(window)` and 
 sized by `Fit(window, chars, page)`: width in characters, height asked of the layout at that
 width, again when a text changes, the screen as the limit and scrolling beyond. No dialog is
 given a size in pixels any more.
+
+## 1.0.3 (2026-10-05): the settings window fitted itself without end
+
+`Fit.fit()` invalidated the layout at every call, and Qt answers an invalidation with a
+LayoutRequest, which `Fit` took for a text change and answered with another fit: thousands of
+fits a second for as long as the window was open. The main thread never rested, and on Ubuntu
+24.04 (GNOME on Wayland, Qt's GTK file dialog drawn in the same process) the file dialog of
+« export credentials… » was a window without content: in Alt-Tab, focused, never drawn. Seen
+in a headless GNOME Shell 46 run on 2026-10-05 and gone with the fix. The layout is now
+invalidated only before the first show (the sizes cached before the style sheet applied), and
+a LayoutRequest fits the window only once it is shown: Qt has refreshed the sizes by then.

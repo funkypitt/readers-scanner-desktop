@@ -2,7 +2,7 @@
 # Arch / Manjaro: cd packaging && makepkg -si
 # Scanners that do not speak eSCL (AirScan) need NAPS2 (AUR: naps2-bin, or the Flatpak com.naps2.Naps2).
 pkgname=readers-scanner
-pkgver=1.0.2
+pkgver=1.0.3
 pkgrel=1
 pkgdesc="One-click scanning to searchable PDFs, filed in the folders shared with the phone"
 arch=('any')
