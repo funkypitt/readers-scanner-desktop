@@ -128,6 +128,7 @@ jobs:
             --name "Readers Scanner" \
             --icon packaging/readers-scanner.ico \
             --add-data "packaging/readers-scanner.png;." \
+            --add-data "packaging/fonts;fonts" \
             --add-data "bundle/tesseract;tesseract" \
             --collect-all pypdfium2 --collect-all pypdfium2_raw --collect-submodules zeroconf \
             readers_scanner.py
@@ -178,6 +179,7 @@ jobs:
             --icon packaging/readers-scanner.icns \
             --osx-bundle-identifier ch.gallaz.readersscanner \
             --add-data "packaging/readers-scanner.png:." \
+            --add-data "packaging/fonts:fonts" \
             --add-data "bundle/tesseract:tesseract" \
             --collect-all pypdfium2 --collect-all pypdfium2_raw --collect-submodules zeroconf \
             readers_scanner.py

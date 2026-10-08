@@ -6,6 +6,7 @@ HERE="$(cd "$(dirname "$0")" && pwd)"; SRC="$HERE/.."
 VERSION=$(grep -oE '^VERSION = "[^"]+"' "$SRC/readers_scanner.py" | cut -d'"' -f2)
 ROOT="$HERE/deb-root"; rm -rf "$ROOT"
 install -Dm755 "$SRC/readers_scanner.py" "$ROOT/usr/lib/readers-scanner/readers_scanner.py"
+for f in "$HERE"/fonts/*; do install -Dm644 "$f" "$ROOT/usr/lib/readers-scanner/fonts/$(basename "$f")"; done
 install -Dm644 "$HERE/readers-scanner.png" "$ROOT/usr/lib/readers-scanner/readers-scanner.png"
 install -Dm755 /dev/stdin "$ROOT/usr/bin/readers-scanner" <<'SH'
 #!/bin/sh
