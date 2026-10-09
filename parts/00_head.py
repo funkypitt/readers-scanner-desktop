@@ -5,6 +5,7 @@ folder (kDrive, Nextcloud…). NAPS2 (naps2.com, installed separately) talks to 
 Tesseract reads the text. One file, PyQt5 + requests + Pillow + numpy. MIT licence."""
 
 import base64
+import filecmp
 import json
 import locale
 import os
@@ -30,7 +31,7 @@ from PIL import Image
 from PyQt5 import QtCore, QtGui, QtWidgets
 
 APP = "readers-scanner"
-VERSION = "1.0.4"
+VERSION = "1.0.5"
 Image.MAX_IMAGE_PIXELS = 200_000_000      # an A3 page at 600 dpi is not an attack
 
 

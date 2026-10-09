@@ -786,6 +786,18 @@ class SettingsDialog(QtWidgets.QDialog):
         creds.addStretch(1)
         form.addRow("", creds)
 
+        # the folder on this computer
+        self.local = QtWidgets.QLineEdit(cfg.get("local_folder", ""))
+        self.local.setPlaceholderText(_("none: the PDFs stay inside the app"))
+        self.local.setCursorPosition(0)
+        choose = QtWidgets.QPushButton(_("choose…")); choose.setObjectName("quiet"); choose.setAutoDefault(False)
+        choose.clicked.connect(self.choose_local)
+        row = QtWidgets.QHBoxLayout(); row.addWidget(self.local, 1); row.addWidget(choose)
+        form.addRow(_("folder on this computer"), row)
+        hint = QtWidgets.QLabel(_("Every document is also a PDF file in this folder, named and filed as on the server. Rename, move and delete in the app: the files follow."))
+        hint.setObjectName("dim"); hint.setWordWrap(True)
+        form.addRow("", hint)
+
         # the scanner
         self.scanner = QtWidgets.QComboBox()
         self.again = QtWidgets.QPushButton(_("look again")); self.again.setObjectName("quiet"); self.again.setAutoDefault(False)
@@ -882,6 +894,14 @@ class SettingsDialog(QtWidgets.QDialog):
         else:
             self.best_state.setText(_("%1: its model will be fetched at the first reading", name))
 
+    def choose_local(self):
+        start = os.path.expanduser(self.local.text().strip()) or os.path.expanduser("~")
+        while start and not os.path.isdir(start):
+            start = os.path.dirname(start) if os.path.dirname(start) != start else ""
+        path = QtWidgets.QFileDialog.getExistingDirectory(self, _("folder on this computer"), start or os.path.expanduser("~"))
+        if path:
+            self.local.setText(path)
+
     def credentials(self, export):
         title = _("export credentials…") if export else _("import credentials…")
         start = os.path.expanduser("~/readers-credentials.json")
@@ -905,7 +925,7 @@ class SettingsDialog(QtWidgets.QDialog):
     def values(self):
         v = {"server": self.server.text().strip(), "username": self.user.text().strip(), "password": self.password.text(),
              "folder": self.folder.text().strip().strip("/") or "Scans", "font": self.font.currentData(), "format": self.format.currentData(),
-             "best": self.best.isChecked()}
+             "best": self.best.isChecked(), "local_folder": self.local.text().strip()}
         key = self.scanner.currentData()
         if self.devices is not None and key:
             routes = pick_routes(self.devices, key)

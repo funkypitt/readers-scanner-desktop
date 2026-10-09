@@ -388,7 +388,8 @@ if WSGIDAV:
     pq.enqueue(pid); wait(lambda: pid in read, 240)
     rs.sync_run(phone, cfg, lambda d: phone.pdf_file(d["id"]), 20)
     before = w.store.count()
-    w.cfg.update(cfg); w.sync()
+    local = w.cfg.get("local_folder", "")
+    w.cfg.update(cfg, local_folder=""); w.sync()
     check("the account set: what the phone scanned is in the list, its folder too; what was scanned here went up", wait(lambda: not w.syncing and w.store.get(pid) is not None, 60)
           and "Wohnung" in w.store.folder_names() and w.store.count() == before + 1 and "↓" in w.status.text() and "↑" in w.status.text(), w.status.text())
     check("the PDFs are on the server under their dated names", sum(f.endswith(".pdf") for _r, _d, fs in os.walk(TMP + "/dav/Scans") for f in fs) == before + 1)
@@ -405,6 +406,28 @@ if WSGIDAV:
     wait(lambda: not w.syncing, 30)
     rs.sync_run(phone, cfg, lambda d: phone.pdf_file(d["id"]), 20)
     check("renamed here: the phone has the new name", phone.get(pid)["name"] == "Mietvertrag" and phone.get(pid)["named"], f"{phone_name} → {phone.get(pid)['name']}")
+    # the folder on this computer (Linux: « Scans » in the documents folder, by itself)
+    if sys.platform.startswith("linux"):
+        check("Linux: the folder on this computer is « Scans » in the documents folder", local == TMP + "/Documents/Scans", local)
+    local = local or TMP + "/Documents/Scans"
+
+    def files(root):
+        return sorted(os.path.relpath(os.path.join(r, f), root).replace("\\", "/") for r, _d, fs in os.walk(root) for f in fs if not r.replace("\\", "/").startswith(root + "/.readers-scanner"))
+
+    # a second document from the phone, never opened here
+    pid2, page2 = rs.new_id(), rs.new_id()[:8]
+    os.makedirs(phone.dir(pid2)); shutil.copyfile(PAGES + "/vertrag.jpg", phone.src_file(pid2, page2))
+    phone.put({"id": pid2, "created": rs.now_ms() + 120000, "modified": rs.now_ms(), "name": "Nebenkosten", "named": True, "folder": "Wohnung", "lang": "deu",
+               "pages": [{"id": page2, "rotation": 0, "look": "original"}], "ocr": rs.PENDING, "rev": 0, "readBy": "", "remote": False, "pageCount": 0})
+    pq.enqueue(pid2); wait(lambda: pid2 in read, 240)
+    rs.sync_run(phone, cfg, lambda d: phone.pdf_file(d["id"]), 20)
+    w.cfg["local_folder"] = local; w.sync()
+    check("with a folder on this computer: every PDF is a file in it, named and filed as on the server — the phone's come down by themselves",
+          wait(lambda: not w.syncing and not w.fetching and w.store.has_pdf(pid2) and files(local) == files(TMP + "/dav/Scans"), 60) and len(files(local)) == before + 2,
+          f"{files(local)} / {files(TMP + '/dav/Scans')}")
+    w.store.rename(pid2, "Nebenkosten 2026"); w.store.delete(pid); w.sync()
+    check("renamed and deleted in the app: the files follow", wait(lambda: not w.syncing and files(local) == files(TMP + "/dav/Scans"), 60) and len(files(local)) == before + 1
+          and any(f.endswith("Nebenkosten 2026.pdf") for f in files(local)), f"{files(local)} / {files(TMP + '/dav/Scans')}")
 
 # ---- 8c. an error nobody caught ------------------------------------------------------------
 before = sys.excepthook

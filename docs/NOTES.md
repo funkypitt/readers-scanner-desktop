@@ -231,3 +231,35 @@ fits a second for as long as the window was open. The main thread never rested, 
 in a headless GNOME Shell 46 run on 2026-10-05 and gone with the fix. The layout is now
 invalidated only before the first show (the sizes cached before the style sheet applied), and
 a LayoutRequest fits the window only once it is shown: Qt has refreshed the sizes by then.
+
+## 1.0.5 (2026-10-09): the scans as plain files, in « Scans » in the documents folder
+
+The user: « by default on Linux, scans go into a "Scans" subfolder within the documents folder,
+and this folder gets synced with the webdav one if it is configured ». Until now a PDF lived
+only inside the app's data (`docs/<id>/doc.pdf`), and one from the phone only once opened.
+
+- `Mirror` (parts/10_core.py) makes a folder what the documents are: one PDF per document,
+  under the path it has on the server once both agree (the sync's own `path`), and until then
+  under the one it will get. Run 0.3 s after every change of the store, after a sync, after a
+  download, and once more before leaving. The setting is `local_folder`; its default on Linux
+  is Qt's documents folder (`xdg-user-dirs`: « Documents » whatever the language) + `Scans`,
+  elsewhere none.
+- With such a folder and a server, the PDFs scanned elsewhere come down by themselves after a
+  sync (`fetch_missing`, one at a time, newest first), no longer only when opened.
+- **One way.** The app writes the folder and never reads it: a file renamed, moved or deleted
+  there by hand is not a rename, a move or a deletion of the document (a deleted one comes
+  back at the next change). Reading it would make a file manager a second device of the
+  sync, without descriptions: not attempted.
+- `mirror.json` holds what was written (path, the PDF's size and time, the file's). A file
+  nobody here wrote is never touched (a document that would take its name gets « (2) »); a
+  file changed by hand since is left as it is, and stays when its document goes. A file that
+  is the document's PDF byte for byte is taken for it: the folder set aside and taken again,
+  or `mirror.json` lost, makes no doubles.
+- The files are hard links to the app's own PDFs (a copy where the disk has no links or is
+  another one): nothing is kept twice. `rename()` does nothing when both names are already
+  one file and leaves the temporary name behind: checked first with `samefile`.
+- Another folder chosen: the files written in the old one go, and are written in the new one.
+  No folder: they stay where they are, and are the user's.
+- Found while testing: the description of what was written was compared with the dict it had
+  been read into, changed in place meanwhile — never different, never saved, and every run
+  wrote every file again under « (2) », « (3) »…

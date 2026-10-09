@@ -232,6 +232,54 @@ try:
     check("a computer that joins later receives everything, and sends nothing", r[0] == 0 and r[2] == 0 and {d["id"] for d in C.store.all()} == {d["id"] for d in A.store.all()} == {d["id"] for d in B.store.all()}
           and C.sync() == (0, 0, 0), str(r))
 
+    # the folder on this computer: the PDFs as plain files, named and filed as on the server
+    FILES = TMP + "/c-files"
+    M = rs.Mirror(C.store)
+
+    def here():
+        return sorted(os.path.relpath(os.path.join(r, f), FILES).replace("\\", "/") for r, _d, fs in os.walk(FILES) for f in fs)
+
+    def scans():           # the server's, without the file someone put there by hand
+        return [f for f in there() if f != "Contrats/mon fichier à moi.pdf"]
+
+    check("the folder on this computer: nothing in it until a PDF is here", M.run(FILES) == 0 and here() == [])
+    n = rs.fetch_missing(C.store, CFG)
+    check("every PDF from elsewhere comes down, and the folder is the server's", n == len(scans()) and M.run(FILES) == n and here() == scans(), f"{n} {here()} {scans()}")
+    check("nothing changed: nothing written again", M.run(FILES) == 0)
+    c1 = C.scan(["facture-1.jpg"], name="Garage", folder="Factures")
+    M.run(FILES)
+    mine = [f for f in here() if f.endswith(" Garage.pdf")]
+    check("scanned here: in the folder as soon as it is read, before any sync", len(mine) == 1 and mine[0].startswith("Factures/") and "106,37 CHF" in pdf_text(FILES + "/" + mine[0]), str(here()))
+    C.sync(); M.run(FILES)
+    check("and after the sync the folder is still the server's", here() == scans(), f"{here()} {scans()}")
+    with open(FILES + "/Factures/notes à moi.pdf", "w") as f:
+        f.write("mine")
+    C.store.rename(c1, "Garage Dupont"); C.store.move(a1, C.store.add_folder("Maison"))
+    M.run(FILES)
+    check("renamed and moved in the app: the files follow, before the sync", any(f.endswith(" Garage Dupont.pdf") for f in here()) and not any(f.endswith(" Garage.pdf") for f in here())
+          and any(f.startswith("Maison/") for f in here()), str(here()))
+    C.sync(); M.run(FILES)
+    check("and after it: the server's again, someone's file left alone", [f for f in here() if f != "Factures/notes à moi.pdf"] == scans() and "Factures/notes à moi.pdf" in here(), f"{here()} {scans()}")
+    edited = FILES + "/" + [f for f in here() if f.endswith(" Garage Dupont.pdf")][0]
+    os.remove(edited)
+    with open(edited, "w") as f:
+        f.write("annotated by hand")
+    M.run(FILES)
+    check("a file changed by hand is left as it is", open(edited).read() == "annotated by hand")
+    C.store.delete(c1); M.run(FILES)
+    check("and stays when its document is deleted; the others' files go with theirs", os.path.exists(edited))
+    os.remove(edited)
+    C.sync(); A.sync()
+    A.store.delete(a1); A.sync(); C.sync(); M.run(FILES)
+    check("deleted on another computer: its file goes here", [f for f in here() if f != "Factures/notes à moi.pdf"] == scans() and not any(f.startswith("Maison/") for f in here()), f"{here()} {scans()}")
+    M.run(TMP + "/c-other")
+    check("another folder chosen: the files are there, the old one keeps only someone's file", here() == ["Factures/notes à moi.pdf"]
+          and sorted(f for _r, _d, fs in os.walk(TMP + "/c-other") for f in fs) == sorted(os.path.basename(f) for f in scans()), str(here()))
+    M.run("")
+    check("no folder: the files stay where they are, the app forgets them", len([f for _r, _d, fs in os.walk(TMP + "/c-other") for f in fs]) == len(scans()) and M.run("") == 0)
+    check("the same folder taken again: its files are recognised, none twice", (M.run(TMP + "/c-other"), M.run(TMP + "/c-other"))[1] == 0 and len([f for _r, _d, fs in os.walk(TMP + "/c-other") for f in fs]) == len(scans()))
+    B.sync()
+
     # a description nobody can read
     with open(SCANS + "/.readers-scanner/zzz.json", "w") as f:
         f.write("{ not json")

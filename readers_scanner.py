@@ -5,6 +5,7 @@ folder (kDrive, Nextcloud…). NAPS2 (naps2.com, installed separately) talks to 
 Tesseract reads the text. One file, PyQt5 + requests + Pillow + numpy. MIT licence."""
 
 import base64
+import filecmp
 import json
 import locale
 import os
@@ -30,7 +31,7 @@ from PIL import Image
 from PyQt5 import QtCore, QtGui, QtWidgets
 
 APP = "readers-scanner"
-VERSION = "1.0.4"
+VERSION = "1.0.5"
 Image.MAX_IMAGE_PIXELS = 200_000_000      # an A3 page at 600 dpi is not an attack
 
 
@@ -183,6 +184,10 @@ _T = {
  "username": ("identifiant", "Benutzername", "usuario", "utilizador", "имя пользователя"),
  "password": ("mot de passe", "Passwort", "contraseña", "palavra-passe", "пароль"),
  "folder on the server": ("dossier sur le serveur", "Ordner auf dem Server", "carpeta en el servidor", "pasta no servidor", "папка на сервере"),
+ "folder on this computer": ("dossier sur cet ordinateur", "Ordner auf diesem Computer", "carpeta en este ordenador", "pasta neste computador", "папка на этом компьютере"),
+ "choose…": ("choisir…", "wählen…", "elegir…", "escolher…", "выбрать…"),
+ "none: the PDFs stay inside the app": ("aucun : les PDF restent dans l'application", "keiner: die PDFs bleiben in der App", "ninguna: los PDF se quedan en la aplicación", "nenhuma: os PDF ficam na aplicação", "нет: PDF остаются в приложении"),
+ "Every document is also a PDF file in this folder, named and filed as on the server. Rename, move and delete in the app: the files follow.": ("Chaque document est aussi un fichier PDF dans ce dossier, nommé et classé comme sur le serveur. Renommez, déplacez et supprimez dans l'application : les fichiers suivent.", "Jedes Dokument ist auch eine PDF-Datei in diesem Ordner, benannt und abgelegt wie auf dem Server. Umbenennen, verschieben und löschen Sie in der App: die Dateien folgen.", "Cada documento es también un archivo PDF en esta carpeta, con el nombre y la carpeta que tiene en el servidor. Renombre, mueva y elimine en la aplicación: los archivos siguen.", "Cada documento é também um ficheiro PDF nesta pasta, com o nome e a pasta que tem no servidor. Mude o nome, mova e elimine na aplicação: os ficheiros acompanham.", "Каждый документ — это ещё и PDF-файл в этой папке, с тем же именем и в той же папке, что на сервере. Переименовывайте, перемещайте и удаляйте в приложении: файлы последуют."),
  "import credentials…": ("importer les identifiants…", "Zugangsdaten importieren…", "importar credenciales…", "importar credenciais…", "импортировать учётные данные…"),
  "export credentials…": ("exporter les identifiants…", "Zugangsdaten exportieren…", "exportar credenciales…", "exportar credenciais…", "экспортировать учётные данные…"),
  "look again": ("chercher à nouveau", "noch einmal suchen", "buscar de nuevo", "procurar de novo", "искать снова"),
@@ -864,6 +869,7 @@ class WebDav:
 META_DIR = ".readers-scanner"
 META_FORMAT = "readers-scanner"
 _sync_lock = threading.Lock()
+_fetch_lock = threading.Lock()
 
 
 def meta_build(doc, pdf, text, pages):
@@ -1106,14 +1112,200 @@ def _sync_run(store, cfg, ensure_pdf, timeout):
 
 def fetch_pdf(store, cfg, doc, progress=None):
     """Brings down the PDF of a document from elsewhere. None when the server does not have it."""
-    path = (_read_state(store).get(doc["id"]) or {}).get("path")
-    if not path:
+    with _fetch_lock:           # opened while every PDF is coming down: one writer per file
+        if store.has_pdf(doc["id"]):
+            return store.pdf_file(doc["id"])
+        path = (_read_state(store).get(doc["id"]) or {}).get("path")
+        if not path:
+            return None
+        os.makedirs(store.dir(doc["id"]), exist_ok=True)
+        dav = WebDav(cfg.get("username", ""), cfg.get("password", ""), 120)
+        out = store.pdf_file(doc["id"])
+        ok = dav.download(folder_url(cfg) + "/".join(encode_segment(p) for p in path.split("/")), out, progress)
+        return out if ok else None
+
+
+def fetch_missing(store, cfg, each=None):
+    """Every PDF from elsewhere that is not here yet, one after the other: the folder on this
+    computer holds what the server holds. One that does not come is asked for again at the
+    next sync. Returns how many came."""
+    came = 0
+    for d in sorted(store.all(), key=lambda d: -d["created"]):
+        if not d.get("remote") or store.has_pdf(d["id"]) or store.get(d["id"]) is None:
+            continue
+        try:
+            if fetch_pdf(store, cfg, d):
+                came += 1
+                each and each(came)
+        except (WebDavError, OSError):
+            break               # the server is not answering: no use asking for the others
+    return came
+
+
+# ------------------------------------------------------------------------------------------
+# The folder on this computer: every document's PDF as a plain file, under the name and in the
+# folder it has on the server, for the file manager and every other program.
+#
+#   Documents/Scans/<folder>/<date> <name>.pdf        Documents/Scans/<date> <name>.pdf
+#
+# The app writes it and never reads it: a document is renamed, moved and deleted in the app (or
+# on the phone), and the files follow. `mirror.json` holds what was written, so that a file put
+# there by someone else is never touched, and a file changed there by hand is left as it is
+# until the document itself changes.
+# ------------------------------------------------------------------------------------------
+
+def default_local_folder():
+    """Linux: « Scans » in the documents folder, whatever the desktop calls it. Elsewhere none,
+    unless one is given in the settings."""
+    if not sys.platform.startswith("linux"):
+        return ""
+    elsewhere = os.environ.get("READERS_SCANNER_HOME")      # the tests' own place
+    if elsewhere:
+        return os.path.join(elsewhere, "Documents", "Scans")
+    docs = QtCore.QStandardPaths.writableLocation(QtCore.QStandardPaths.DocumentsLocation)
+    return os.path.join(docs or os.path.expanduser("~/Documents"), "Scans")
+
+
+def _stat(path):
+    try:
+        st = os.stat(path)
+        return [st.st_size, st.st_mtime_ns]
+    except OSError:
         return None
-    os.makedirs(store.dir(doc["id"]), exist_ok=True)
-    dav = WebDav(cfg.get("username", ""), cfg.get("password", ""), 120)
-    out = store.pdf_file(doc["id"])
-    ok = dav.download(folder_url(cfg) + "/".join(encode_segment(p) for p in path.split("/")), out, progress)
-    return out if ok else None
+
+
+class Mirror:
+    def __init__(self, store):
+        self.store = store
+        self.file = os.path.join(store.root, "mirror.json")
+        self.lock = threading.Lock()
+
+    def _read(self):
+        try:
+            with open(self.file, encoding="utf-8") as f:
+                m = json.load(f)
+            return m if isinstance(m.get("files"), dict) else {}
+        except (OSError, ValueError, AttributeError):
+            return {}
+
+    def _write(self, m):
+        with open(self.file + ".tmp", "w", encoding="utf-8") as f:
+            json.dump(m, f, indent=1, ensure_ascii=False)
+        replace(self.file + ".tmp", self.file)
+
+    @staticmethod
+    def _drop(root, entry):
+        """Takes away a file written here, unless someone changed it since: then it is theirs."""
+        path = os.path.join(root, *entry["path"].split("/"))
+        if _stat(path) == entry.get("dst"):
+            try:
+                remove(path)
+            except OSError:
+                return
+            if "/" in entry["path"]:
+                try:
+                    os.rmdir(os.path.dirname(path))     # only when nothing is left in it
+                except OSError:
+                    pass
+
+    @staticmethod
+    def _other(src, path):
+        try:
+            return os.path.lexists(path) and not (os.path.isfile(path) and filecmp.cmp(src, path, shallow=False))
+        except OSError:
+            return True
+
+    def run(self, root):
+        """Makes the folder what the documents are. Returns how many files were written."""
+        with self.lock:
+            try:
+                return self._run(os.path.abspath(os.path.expanduser(root)) if root else "")
+            except OSError:
+                return 0        # a folder that cannot be written (a disk unplugged): next time
+
+    def _run(self, root):
+        m = self._read()
+        files, was = dict(m.get("files", {})), m.get("root", "")
+        if not root:                            # no folder any more: the files there are the user's now
+            if m:
+                self._write({})
+            return 0
+        if was and was != root:                 # another folder was chosen: the files move there
+            for e in files.values():
+                self._drop(was, e)
+            files = {}
+        os.makedirs(root, exist_ok=True)
+        state = _read_state(self.store)
+        ours = {e["path"].lower() for e in files.values()}
+        wanted, taken = {}, set()
+        for d in sorted(self.store.all(), key=lambda d: d["created"]):
+            if not self.store.has_pdf(d["id"]):
+                continue
+            agreed = state.get(d["id"]) or {}
+            # the name it has on the server, once both agree; until then the one it will get
+            first = agreed["path"] if agreed.get("path") and agreed.get("key") == _key(d) else "/".join(p for p in (d.get("folder", ""), file_name_of(d)) if p)
+            if not all(p and p not in (".", "..") for p in first.split("/")):
+                continue
+            rel, i = first, 2
+            # another document, or someone's file, already has that name (the same PDF, byte for
+            # byte, is this document: the folder was set aside and taken again)
+            while rel.lower() in taken or (rel.lower() not in ours and self._other(self.store.pdf_file(d["id"]), os.path.join(root, *rel.split("/")))):
+                rel = f"{first[:-4]} ({i}).pdf"
+                i += 1
+            taken.add(rel.lower())
+            wanted[d["id"]] = rel
+        for doc_id, e in list(files.items()):
+            if wanted.get(doc_id) != e["path"]:
+                if e["path"].lower() not in taken:
+                    self._drop(root, e)
+                files.pop(doc_id)
+        written = 0
+        for doc_id, rel in wanted.items():
+            src = self.store.pdf_file(doc_id)
+            dst = os.path.join(root, *rel.split("/"))
+            sig, e = _stat(src), files.get(doc_id)
+            if sig is None:
+                continue
+            if e and e.get("src") == sig and os.path.exists(dst):
+                continue                        # as it was left, or changed by hand: theirs
+            try:
+                if os.path.exists(dst) and os.path.samefile(src, dst):
+                    files[doc_id] = {"path": rel, "src": sig, "dst": _stat(dst)}      # it is there already
+                    continue
+                os.makedirs(os.path.dirname(dst), exist_ok=True)
+                tmp = os.path.join(os.path.dirname(dst), ".part-" + doc_id)
+                try:
+                    remove(tmp)
+                except OSError:
+                    pass
+                try:
+                    os.link(src, tmp)           # the same file twice, kept once on the disk
+                except OSError:
+                    shutil.copy2(src, tmp)      # another disk, or one without links
+                replace(tmp, dst)
+            except OSError:
+                continue
+            files[doc_id] = {"path": rel, "src": sig, "dst": _stat(dst)}
+            written += 1
+        # the folders too, empty ones included; one that went here goes there once it is empty
+        made = set(m.get("dirs", [])) if was == root else set()
+        names = set(self.store.folder_names())
+        for name in names:
+            try:
+                if not os.path.isdir(os.path.join(root, name)):
+                    os.makedirs(os.path.join(root, name))
+                    made.add(name)
+            except OSError:
+                pass
+        for name in sorted(made - names):
+            try:
+                os.rmdir(os.path.join(root, name))
+            except OSError:
+                pass
+        new = {"root": root, "files": files, "dirs": sorted(made & names)}
+        if new != m:
+            self._write(new)
+        return written
 # Written by tools/naps2_messages.py from NAPS2 v8.2.1 (46 languages): do not edit by hand.
 # What NAPS2 says when a scan fails (lower case, no final stop) → our word for it.
 NAPS2_WORDS = {
@@ -3789,6 +3981,18 @@ class SettingsDialog(QtWidgets.QDialog):
         creds.addStretch(1)
         form.addRow("", creds)
 
+        # the folder on this computer
+        self.local = QtWidgets.QLineEdit(cfg.get("local_folder", ""))
+        self.local.setPlaceholderText(_("none: the PDFs stay inside the app"))
+        self.local.setCursorPosition(0)
+        choose = QtWidgets.QPushButton(_("choose…")); choose.setObjectName("quiet"); choose.setAutoDefault(False)
+        choose.clicked.connect(self.choose_local)
+        row = QtWidgets.QHBoxLayout(); row.addWidget(self.local, 1); row.addWidget(choose)
+        form.addRow(_("folder on this computer"), row)
+        hint = QtWidgets.QLabel(_("Every document is also a PDF file in this folder, named and filed as on the server. Rename, move and delete in the app: the files follow."))
+        hint.setObjectName("dim"); hint.setWordWrap(True)
+        form.addRow("", hint)
+
         # the scanner
         self.scanner = QtWidgets.QComboBox()
         self.again = QtWidgets.QPushButton(_("look again")); self.again.setObjectName("quiet"); self.again.setAutoDefault(False)
@@ -3885,6 +4089,14 @@ class SettingsDialog(QtWidgets.QDialog):
         else:
             self.best_state.setText(_("%1: its model will be fetched at the first reading", name))
 
+    def choose_local(self):
+        start = os.path.expanduser(self.local.text().strip()) or os.path.expanduser("~")
+        while start and not os.path.isdir(start):
+            start = os.path.dirname(start) if os.path.dirname(start) != start else ""
+        path = QtWidgets.QFileDialog.getExistingDirectory(self, _("folder on this computer"), start or os.path.expanduser("~"))
+        if path:
+            self.local.setText(path)
+
     def credentials(self, export):
         title = _("export credentials…") if export else _("import credentials…")
         start = os.path.expanduser("~/readers-credentials.json")
@@ -3908,7 +4120,7 @@ class SettingsDialog(QtWidgets.QDialog):
     def values(self):
         v = {"server": self.server.text().strip(), "username": self.user.text().strip(), "password": self.password.text(),
              "folder": self.folder.text().strip().strip("/") or "Scans", "font": self.font.currentData(), "format": self.format.currentData(),
-             "best": self.best.isChecked()}
+             "best": self.best.isChecked(), "local_folder": self.local.text().strip()}
         key = self.scanner.currentData()
         if self.devices is not None and key:
             routes = pick_routes(self.devices, key)
@@ -3948,6 +4160,9 @@ class Main(QtWidgets.QMainWindow):
         self.store = store or Store(os.path.join(DATA_DIR, "scans"))
         self.store.on_change = self.store_changed.emit          # from any thread: queued to the UI
         self.cfg.setdefault("best", True)
+        if "local_folder" not in self.cfg:              # Linux: « Scans » in the documents folder
+            self.cfg["local_folder"] = default_local_folder()
+        self.mirror = Mirror(self.store)
         self.reader = Reader(DATA_DIR)
         self.reader.prefer_best = bool(self.cfg["best"])
         self.naps2 = Naps2(DATA_DIR)
@@ -3963,6 +4178,7 @@ class Main(QtWidgets.QMainWindow):
         self.syncing = False
         self.sync_again = False
         self.downloads = {}           # document → percent
+        self.fetching = False         # the PDFs from elsewhere are coming down, for the folder here
         self.show_text = False
         self.last_status = ""
         self.quitting = False
@@ -4107,6 +4323,10 @@ class Main(QtWidgets.QMainWindow):
 
         self.refresh_timer = QtCore.QTimer(self, singleShot=True, interval=0, timeout=self.after_change)
         self.store_changed.connect(self.refresh_timer.start)
+        # the folder on this computer follows every change, a moment later and off this thread
+        self.mirror_timer = QtCore.QTimer(self, singleShot=True, interval=300, timeout=self.mirror_now)
+        self.store_changed.connect(self.mirror_timer.start)
+        self.mirror_timer.start()
         self.read_progress.connect(self.refresh_timer.start)
         self.read_done.connect(self.after_read)
         self.periodic = QtCore.QTimer(self, interval=SYNC_MINUTES * 60 * 1000, timeout=self.sync)
@@ -4576,6 +4796,7 @@ class Main(QtWidgets.QMainWindow):
 
         def done(path):
             self.downloads.pop(doc_id, None)
+            self.mirror_timer.start()
             if not path:
                 self.download_error = dict(getattr(self, "download_error", {}), **{doc_id: _("the PDF is not on the server (any more)")})
             self.after_change()
@@ -4602,7 +4823,7 @@ class Main(QtWidgets.QMainWindow):
             if not self.configured():
                 return
             cfg = dict(self.cfg)
-            self.run(lambda say: fetch_pdf(self.store, cfg, d, None), lambda p: (self.after_change(), p and then(p)), lambda m: None)
+            self.run(lambda say: fetch_pdf(self.store, cfg, d, None), lambda p: (self.after_change(), self.mirror_timer.start(), p and then(p)), lambda m: None)
         else:
             pages = [f for f in (self.store.page_file(doc_id, p["id"]) for p in d["pages"]) if os.path.exists(f)]
             if len(pages) == len(d["pages"]) and pages:
@@ -5129,6 +5350,25 @@ class Main(QtWidgets.QMainWindow):
             return plain_pdf(pages, self.store.pdf_file(d["id"]))
         return None
 
+    def mirror_now(self):
+        root = self.cfg.get("local_folder", "")
+        self.run(lambda say: self.mirror.run(root), lambda n: None, lambda m: None)
+
+    def fetch_missing(self):
+        """With a folder on this computer, the PDFs scanned elsewhere come down by themselves."""
+        if self.fetching or self.quitting or not self.cfg.get("local_folder") or not self.configured():
+            return
+        if not any(d.get("remote") and not self.store.has_pdf(d["id"]) for d in self.store.all()):
+            return
+        self.fetching = True
+        cfg, root = dict(self.cfg), self.cfg["local_folder"]
+
+        def over(_result):
+            self.fetching = False
+            self.after_change()
+
+        self.run(lambda say: fetch_missing(self.store, cfg, lambda n: (self.mirror.run(root), say(n))), over, over, lambda n: self.after_change())
+
     def sync(self):
         if not self.configured():
             self.update_status()
@@ -5147,6 +5387,8 @@ class Main(QtWidgets.QMainWindow):
         arrows = "".join(f" {n}{a}" for n, a in ((up, "↑"), (down, "↓"), (deleted, "−")) if n)
         self.last_status = _("synced %1", datetime.now().strftime("%H:%M")) + arrows
         self.update_status()
+        self.mirror_timer.start()          # the names agreed with the server are the files' names
+        self.fetch_missing()
         if self.sync_again:
             self.sync_again = False
             self.sync()
@@ -5193,6 +5435,7 @@ class Main(QtWidgets.QMainWindow):
         self.apply_style()
         self.refresh_list()
         self.update_status()
+        self.mirror_timer.start()
         self.sync()
 
     # ---- window ------------------------------------------------------------------------
@@ -5222,6 +5465,8 @@ class Main(QtWidgets.QMainWindow):
             self.sync()
             return
         self.leave_timer.stop()
+        self.mirror_timer.stop()
+        self.mirror.run(self.cfg.get("local_folder", ""))
         QtWidgets.QApplication.quit()
 
 

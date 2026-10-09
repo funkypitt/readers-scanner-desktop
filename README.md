@@ -34,6 +34,11 @@ no account with the app, nothing leaves your computer except to your own WebDAV 
 - **The phone's folders**: enter the same WebDAV server as on the phone (kDrive, Nextcloud…) and
   both see the same documents and folders. What was scanned elsewhere is listed and searchable at
   once; its PDF comes down when you open it. Renaming, moving and deleting travel both ways.
+- **Plain files on this computer**: on Linux every document is also a PDF in `Scans`, in your
+  documents folder, named and filed as on the server (`Scans/Factures/2026-09-27 19h51 Facture.pdf`),
+  for the file manager and every other program; the phone's scans come down into it by
+  themselves. Another folder, or none, in the settings (Windows and macOS: none until you give
+  one). The app writes that folder and does not read it: rename, move and delete in the app.
 - **Pictures and PDFs too**: drop them on the window or Ctrl+O; they are read and filed like a scan.
 - Ctrl+F finds in names and text; F2 renames; Delete deletes; F5 syncs; Ctrl+T flips white on
   black / black on white; Ctrl+= and Ctrl+- change the size; Ctrl+, opens the settings.

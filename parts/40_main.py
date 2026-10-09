@@ -31,6 +31,9 @@ class Main(QtWidgets.QMainWindow):
         self.store = store or Store(os.path.join(DATA_DIR, "scans"))
         self.store.on_change = self.store_changed.emit          # from any thread: queued to the UI
         self.cfg.setdefault("best", True)
+        if "local_folder" not in self.cfg:              # Linux: « Scans » in the documents folder
+            self.cfg["local_folder"] = default_local_folder()
+        self.mirror = Mirror(self.store)
         self.reader = Reader(DATA_DIR)
         self.reader.prefer_best = bool(self.cfg["best"])
         self.naps2 = Naps2(DATA_DIR)
@@ -46,6 +49,7 @@ class Main(QtWidgets.QMainWindow):
         self.syncing = False
         self.sync_again = False
         self.downloads = {}           # document → percent
+        self.fetching = False         # the PDFs from elsewhere are coming down, for the folder here
         self.show_text = False
         self.last_status = ""
         self.quitting = False
@@ -190,6 +194,10 @@ class Main(QtWidgets.QMainWindow):
 
         self.refresh_timer = QtCore.QTimer(self, singleShot=True, interval=0, timeout=self.after_change)
         self.store_changed.connect(self.refresh_timer.start)
+        # the folder on this computer follows every change, a moment later and off this thread
+        self.mirror_timer = QtCore.QTimer(self, singleShot=True, interval=300, timeout=self.mirror_now)
+        self.store_changed.connect(self.mirror_timer.start)
+        self.mirror_timer.start()
         self.read_progress.connect(self.refresh_timer.start)
         self.read_done.connect(self.after_read)
         self.periodic = QtCore.QTimer(self, interval=SYNC_MINUTES * 60 * 1000, timeout=self.sync)
@@ -659,6 +667,7 @@ class Main(QtWidgets.QMainWindow):
 
         def done(path):
             self.downloads.pop(doc_id, None)
+            self.mirror_timer.start()
             if not path:
                 self.download_error = dict(getattr(self, "download_error", {}), **{doc_id: _("the PDF is not on the server (any more)")})
             self.after_change()
@@ -685,7 +694,7 @@ class Main(QtWidgets.QMainWindow):
             if not self.configured():
                 return
             cfg = dict(self.cfg)
-            self.run(lambda say: fetch_pdf(self.store, cfg, d, None), lambda p: (self.after_change(), p and then(p)), lambda m: None)
+            self.run(lambda say: fetch_pdf(self.store, cfg, d, None), lambda p: (self.after_change(), self.mirror_timer.start(), p and then(p)), lambda m: None)
         else:
             pages = [f for f in (self.store.page_file(doc_id, p["id"]) for p in d["pages"]) if os.path.exists(f)]
             if len(pages) == len(d["pages"]) and pages:
@@ -1212,6 +1221,25 @@ class Main(QtWidgets.QMainWindow):
             return plain_pdf(pages, self.store.pdf_file(d["id"]))
         return None
 
+    def mirror_now(self):
+        root = self.cfg.get("local_folder", "")
+        self.run(lambda say: self.mirror.run(root), lambda n: None, lambda m: None)
+
+    def fetch_missing(self):
+        """With a folder on this computer, the PDFs scanned elsewhere come down by themselves."""
+        if self.fetching or self.quitting or not self.cfg.get("local_folder") or not self.configured():
+            return
+        if not any(d.get("remote") and not self.store.has_pdf(d["id"]) for d in self.store.all()):
+            return
+        self.fetching = True
+        cfg, root = dict(self.cfg), self.cfg["local_folder"]
+
+        def over(_result):
+            self.fetching = False
+            self.after_change()
+
+        self.run(lambda say: fetch_missing(self.store, cfg, lambda n: (self.mirror.run(root), say(n))), over, over, lambda n: self.after_change())
+
     def sync(self):
         if not self.configured():
             self.update_status()
@@ -1230,6 +1258,8 @@ class Main(QtWidgets.QMainWindow):
         arrows = "".join(f" {n}{a}" for n, a in ((up, "↑"), (down, "↓"), (deleted, "−")) if n)
         self.last_status = _("synced %1", datetime.now().strftime("%H:%M")) + arrows
         self.update_status()
+        self.mirror_timer.start()          # the names agreed with the server are the files' names
+        self.fetch_missing()
         if self.sync_again:
             self.sync_again = False
             self.sync()
@@ -1276,6 +1306,7 @@ class Main(QtWidgets.QMainWindow):
         self.apply_style()
         self.refresh_list()
         self.update_status()
+        self.mirror_timer.start()
         self.sync()
 
     # ---- window ------------------------------------------------------------------------
@@ -1305,6 +1336,8 @@ class Main(QtWidgets.QMainWindow):
             self.sync()
             return
         self.leave_timer.stop()
+        self.mirror_timer.stop()
+        self.mirror.run(self.cfg.get("local_folder", ""))
         QtWidgets.QApplication.quit()
 
 
