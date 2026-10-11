@@ -31,7 +31,7 @@ from PIL import Image
 from PyQt5 import QtCore, QtGui, QtWidgets
 
 APP = "readers-scanner"
-VERSION = "1.0.6"
+VERSION = "1.0.7"
 Image.MAX_IMAGE_PIXELS = 200_000_000      # an A3 page at 600 dpi is not an attack
 
 
@@ -4101,7 +4101,7 @@ class SettingsDialog(QtWidgets.QDialog):
 
     def credentials(self, export):
         title = _("export credentials…") if export else _("import credentials…")
-        start = os.path.expanduser("~/readers-credentials.json")
+        start = os.path.expanduser("~/readers-scanner-credentials.json")
         if export:
             path, _f = QtWidgets.QFileDialog.getSaveFileName(self, title, start, _("Reader's credentials (*.json)"), options=QtWidgets.QFileDialog.DontConfirmOverwrite)
         else:

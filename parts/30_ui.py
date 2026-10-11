@@ -904,7 +904,7 @@ class SettingsDialog(QtWidgets.QDialog):
 
     def credentials(self, export):
         title = _("export credentials…") if export else _("import credentials…")
-        start = os.path.expanduser("~/readers-credentials.json")
+        start = os.path.expanduser("~/readers-scanner-credentials.json")
         if export:
             path, _f = QtWidgets.QFileDialog.getSaveFileName(self, title, start, _("Reader's credentials (*.json)"), options=QtWidgets.QFileDialog.DontConfirmOverwrite)
         else:
