@@ -57,7 +57,7 @@ class Main(QtWidgets.QMainWindow):
         self.setAcceptDrops(True)
         self.resize(1180, 800)
         self.font_size = int(self.cfg.get("font_size", 13))
-        self.dark = bool(self.cfg.get("dark", False))
+        self.theme = theme_of(self.cfg)
 
         central = QtWidgets.QWidget()
         self.setCentralWidget(central)
@@ -233,12 +233,12 @@ class Main(QtWidgets.QMainWindow):
     # ---- look ------------------------------------------------------------------------
 
     def colours(self):
-        return ("#000000", "#ffffff") if self.dark else ("#ffffff", "#000000")
+        """(bg, fg, accent, on_accent) of the current theme."""
+        return palette(self.theme)
 
     def apply_style(self):
-        bg, fg = self.colours()
-        dim = "rgba(255,255,255,0.55)" if self.dark else "rgba(0,0,0,0.55)"
-        rl = "rgba(255,255,255,0.25)" if self.dark else "rgba(0,0,0,0.25)"
+        bg, fg, accent, on_accent = self.colours()
+        dim, rl = rgba(fg, 0.55), rgba(fg, 0.25)
         s = self.font_size
         family = {"serif": "serif", "mono": "monospace"}.get(self.cfg.get("font"), SANS_FAMILY)
         self.setStyleSheet(f"""
@@ -256,31 +256,32 @@ class Main(QtWidgets.QMainWindow):
             QLabel#tool {{ color: {dim}; font-size: {s + 2}pt; padding: 0 2px; }}
             QLabel#addtile {{ color: {dim}; border: 1px dashed {dim}; font-size: {s + 3}pt; }}
             QLabel#addtile:hover {{ color: {fg}; border: 1px dashed {fg}; }}
-            QLabel#scan {{ background: {fg}; color: {bg}; font-size: {s + 7}pt; padding: 26px 22px; }}
+            QLabel#scan {{ background: {accent}; color: {on_accent}; font-size: {s + 7}pt; padding: 26px 22px; }}
             QLabel#scanning {{ background: {bg}; color: {fg}; font-size: {s + 7}pt; padding: 25px 21px; border: 1px solid {fg}; }}
             QLabel#placebar {{ color: {dim}; padding: 12px 22px; border-bottom: 1px solid {rl}; }}
             QFrame#sep {{ background: {rl}; }}
             QLineEdit#find {{ border: none; border-bottom: 1px solid {rl}; padding: 14px 22px; }}
             QLineEdit#name {{ border: none; border-bottom: 1px solid {rl}; padding: 8px 0; font-size: {s + 3}pt; }}
             QListWidget#rows {{ background: {bg}; border: none; outline: none; padding: 6px 0; }}
-            QTextEdit {{ background: {bg}; color: {fg}; border: none; font-size: {s + 2}pt; selection-background-color: {fg}; selection-color: {bg}; }}
+            QTextEdit {{ background: {bg}; color: {fg}; border: none; font-size: {s + 2}pt; selection-background-color: {accent}; selection-color: {on_accent}; }}
             QScrollArea {{ border: none; }}
             QScrollBar:vertical {{ background: {bg}; width: 6px; }} QScrollBar::handle:vertical {{ background: {rl}; min-height: 24px; }}
             QScrollBar::add-line, QScrollBar::sub-line {{ height: 0; }} QScrollBar::add-page, QScrollBar::sub-page {{ background: {bg}; }}
             QMenu {{ background: {bg}; color: {fg}; border: 1px solid {rl}; padding: 4px 0; }}
-            QMenu::item {{ padding: 6px 22px; }} QMenu::item:selected {{ background: {fg}; color: {bg}; }}
+            QMenu::item {{ padding: 6px 22px; }} QMenu::item:selected {{ background: {accent}; color: {on_accent}; }}
             QMenu::separator {{ height: 1px; background: {rl}; margin: 4px 0; }}
             QDialog QLineEdit, QComboBox {{ background: {bg}; color: {fg}; border: 1px solid {rl}; padding: 6px; }}
-            QComboBox QAbstractItemView {{ background: {bg}; color: {fg}; selection-background-color: {fg}; selection-color: {bg}; }}
+            QComboBox QAbstractItemView {{ background: {bg}; color: {fg}; selection-background-color: {accent}; selection-color: {on_accent}; }}
             QPushButton {{ background: {bg}; color: {fg}; border: 1px solid {fg}; padding: 6px 18px; }}
-            QPushButton:default {{ background: {fg}; color: {bg}; }}
+            QPushButton:default {{ background: {accent}; color: {on_accent}; border-color: {accent}; }}
             QPushButton#quiet {{ border: none; color: {dim}; padding: 6px 4px; text-align: left; }}
             QPushButton#chip {{ padding: 9px 18px; font-size: {s + 1}pt; }}
-            QPushButton#chip:hover {{ background: {fg}; color: {bg}; }}
+            QPushButton#chip:hover {{ background: {accent}; color: {on_accent}; border-color: {accent}; }}
             QPushButton#chipnew {{ padding: 9px 18px; font-size: {s + 1}pt; border: 1px dashed {dim}; color: {dim}; }}
             QToolTip {{ background: {bg}; color: {fg}; border: 1px solid {rl}; }}
         """)
         self.delegate.fg, self.delegate.bg = QtGui.QColor(fg), QtGui.QColor(bg)
+        self.delegate.accent, self.delegate.on_accent = QtGui.QColor(accent), QtGui.QColor(on_accent)
         big = QtGui.QFont(family)
         big.setPointSize(s + 1)
         big.setWeight(QtGui.QFont.Light)
@@ -295,8 +296,13 @@ class Main(QtWidgets.QMainWindow):
         self.list.viewport().update()
 
     def toggle_theme(self):
-        self.dark = not self.dark
-        self.cfg["dark"] = self.dark
+        """The next theme of the cycle: the other ink, then the Plume palettes (Ctrl+T, the ⋯ menu)."""
+        self.set_theme(next_theme(self.theme))
+
+    def set_theme(self, key):
+        self.theme = key if key in THEME_KEYS else DEFAULT_THEME
+        self.cfg["theme"] = self.theme
+        self.cfg["dark"] = is_dark(self.theme)      # what an older version of the app reads
         save_config(self.cfg)
         self.apply_style()
         self.redraw()
@@ -819,7 +825,7 @@ class Main(QtWidgets.QMainWindow):
         m.addAction(_("from files…") + "\tCtrl+O", self.import_files)
         if self.configured():
             m.addAction(_("sync now") + "\tF5", self.sync)
-        m.addAction(_("black on white") if self.dark else _("white on black"), self.toggle_theme)
+        m.addAction(_(THEME_LABELS[next_theme(self.theme)]) + "\tCtrl+T", self.toggle_theme)
         m.addAction(_("settings"), self.setup)
         m.exec_(self.more.mapToGlobal(QtCore.QPoint(self.more.width() - m.sizeHint().width(), self.more.height())))
 

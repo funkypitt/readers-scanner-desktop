@@ -40,8 +40,10 @@ no account with the app, nothing leaves your computer except to your own WebDAV 
   themselves. Another folder, or none, in the settings (Windows and macOS: none until you give
   one). The app writes that folder and does not read it: rename, move and delete in the app.
 - **Pictures and PDFs too**: drop them on the window or Ctrl+O; they are read and filed like a scan.
-- Ctrl+F finds in names and text; F2 renames; Delete deletes; F5 syncs; Ctrl+T flips white on
-  black / black on white; Ctrl+= and Ctrl+- change the size; Ctrl+, opens the settings.
+- Ctrl+F finds in names and text; F2 renames; Delete deletes; F5 syncs; Ctrl+T moves to the next
+  colour theme (black on white, white on black, then the Plume keyboard's palettes: lavender, sage,
+  nordic, terracotta, coquette, activist, sultry, nature); Ctrl+= and Ctrl+- change the size;
+  Ctrl+, opens the settings.
 - English, French, German, Spanish, Portuguese and Russian, following the system language.
 
 More detail: [docs/NOTES.md](docs/NOTES.md).

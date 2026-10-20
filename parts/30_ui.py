@@ -248,11 +248,12 @@ FOLDERS = "\x00folders"            # the place: the list of folders
 
 class RowDelegate(QtWidgets.QStyledItemDelegate):
     """The list: folders (a small folder, the name, the count) or documents (the name, then a
-    dim line). The chosen row is drawn inverted, like every selection in the Reader's apps."""
+    dim line). The chosen row is filled with the theme's accent, like every selection in the Reader's apps."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.fg, self.bg = QtGui.QColor("#000"), QtGui.QColor("#fff")
+        self.accent, self.on_accent = self.fg, self.bg       # the chosen row's fill and its text
         self.big, self.small = QtGui.QFont(), QtGui.QFont()
 
     def sizeHint(self, option, index):
@@ -267,7 +268,7 @@ class RowDelegate(QtWidgets.QStyledItemDelegate):
         p.save()
         r = option.rect.adjusted(22, 10, -22, -10)
         sel = bool(option.state & QtWidgets.QStyle.State_Selected) and not index.data(KIND)
-        fg, bg = (self.bg, self.fg) if sel else (self.fg, self.bg)
+        fg, bg = (self.on_accent, self.accent) if sel else (self.fg, self.bg)
         p.fillRect(option.rect, bg)
         dim = QtGui.QColor(fg)
         dim.setAlphaF(0.6 if sel else 0.55)

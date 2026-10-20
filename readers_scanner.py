@@ -31,8 +31,69 @@ from PIL import Image
 from PyQt5 import QtCore, QtGui, QtWidgets
 
 APP = "readers-scanner"
-VERSION = "1.0.7"
+VERSION = "1.1.0"
 Image.MAX_IMAGE_PIXELS = 200_000_000      # an A3 page at 600 dpi is not an attack
+
+
+# ------------------------------------------------------------------------------------------
+# The colour themes shared by the Reader's apps: the two inks, then the palettes of the Plume
+# keyboard in its order. A theme is a background, a text colour, an accent (what is painted
+# "text colour as background" today: the chosen row, the default button, the scan button) and
+# the text on that accent. In the two inks the accent is the text colour, so they look as before.
+# ------------------------------------------------------------------------------------------
+
+PALETTES = [          # key, bg, fg, accent, on_accent
+    ("DARK", "#000000", "#ffffff", "#ffffff", "#000000"),
+    ("LIGHT", "#ffffff", "#000000", "#000000", "#ffffff"),
+    ("LAVANDE", "#1f1a2e", "#f4efff", "#b8a4ff", "#1f1a2e"),
+    ("SAUGE", "#d9e0d4", "#1e2a21", "#4c7a5b", "#ffffff"),
+    ("NORDIQUE", "#2e3440", "#eceff4", "#88c0d0", "#2e3440"),
+    ("TERRACOTTA", "#e6d9cc", "#2b211b", "#c25e38", "#ffffff"),
+    ("COQUETTE", "#f3d9dc", "#4a1f2b", "#d2455e", "#ffffff"),
+    ("MILITANTE", "#f2eee4", "#121212", "#e8412e", "#ffffff"),
+    ("TORRIDE", "#1e0d13", "#f8e9e6", "#e02a50", "#fff4f2"),
+    ("NATURE", "#2b2a24", "#f2efe4", "#d19a4e", "#2b2a24"),
+]
+DEFAULT_THEME = "LIGHT"     # this app has always opened black on white
+THEME_KEYS = [p[0] for p in PALETTES]
+# the cycle: the app's own default first, the other ink, then the palettes in order
+THEME_CYCLE = [DEFAULT_THEME] + [k for k in THEME_KEYS if k != DEFAULT_THEME]
+THEME_LABELS = {"DARK": "white on black", "LIGHT": "black on white", "LAVANDE": "lavender", "SAUGE": "sage",
+                "NORDIQUE": "nordic", "TERRACOTTA": "terracotta", "COQUETTE": "coquette", "MILITANTE": "activist",
+                "TORRIDE": "sultry", "NATURE": "nature"}
+
+
+def palette(key):
+    """(bg, fg, accent, on_accent) of a theme; an unknown name gives the default."""
+    return next((p[1:] for p in PALETTES if p[0] == key), next(p[1:] for p in PALETTES if p[0] == DEFAULT_THEME))
+
+
+def next_theme(key):
+    return THEME_CYCLE[(THEME_CYCLE.index(key) + 1) % len(THEME_CYCLE)] if key in THEME_CYCLE else DEFAULT_THEME
+
+
+def theme_of(cfg):
+    """The theme a config means: « theme » when it is there, else the old « dark » flag."""
+    key = str(cfg.get("theme") or "").upper()
+    if key in THEME_KEYS:
+        return key
+    if "dark" in cfg:
+        return "DARK" if cfg.get("dark") else "LIGHT"
+    return DEFAULT_THEME
+
+
+def is_dark(key):
+    """Whether a theme's background is dark (what the old « dark » flag said)."""
+    bg = palette(key)[0].lstrip("#")
+    r, g, b = (int(bg[i:i + 2], 16) for i in (0, 2, 4))
+    return 0.299 * r + 0.587 * g + 0.114 * b < 128
+
+
+def rgba(hex_colour, alpha):
+    """A CSS rgba() of a hex colour: dims and rules are the text colour, faded."""
+    h = hex_colour.lstrip("#")
+    r, g, b = (int(h[i:i + 2], 16) for i in (0, 2, 4))
+    return f"rgba({r},{g},{b},{alpha})"
 
 
 def _app_dirs():
@@ -257,6 +318,14 @@ _T = {
  "sync now": ("synchroniser", "jetzt synchronisieren", "sincronizar ahora", "sincronizar agora", "синхронизировать"),
  "black on white": ("noir sur blanc", "schwarz auf weiss", "negro sobre blanco", "preto sobre branco", "чёрное на белом"),
  "white on black": ("blanc sur noir", "weiss auf schwarz", "blanco sobre negro", "branco sobre preto", "белое на чёрном"),
+ "lavender": ("lavande", "Lavendel", "lavanda", "lavanda", "лаванда"),
+ "sage": ("sauge", "Salbei", "salvia", "sálvia", "шалфей"),
+ "nordic": ("nordique", "nordisch", "nórdico", "nórdico", "северный"),
+ "terracotta": ("terracotta", "Terrakotta", "terracota", "terracota", "терракота"),
+ "coquette": ("coquette", "kokett", "coqueta", "coquete", "кокетка"),
+ "activist": ("militante", "kämpferisch", "militante", "militante", "активистка"),
+ "sultry": ("torride", "glühend", "tórrido", "tórrido", "знойный"),
+ "nature": ("nature", "Natur", "naturaleza", "natureza", "природа"),
  "settings": ("réglages", "Einstellungen", "ajustes", "definições", "настройки"),
  "name (empty: the date alone)": ("nom (vide : la date seule)", "Name (leer: nur das Datum)", "nombre (vacío: solo la fecha)", "nome (vazio: só a data)", "название (пусто: только дата)"),
  "Delete “%1”?": ("Supprimer « %1 » ?", "„%1“ löschen?", "¿Eliminar «%1»?", "Eliminar «%1»?", "Удалить «%1»?"),
@@ -3445,11 +3514,12 @@ FOLDERS = "\x00folders"            # the place: the list of folders
 
 class RowDelegate(QtWidgets.QStyledItemDelegate):
     """The list: folders (a small folder, the name, the count) or documents (the name, then a
-    dim line). The chosen row is drawn inverted, like every selection in the Reader's apps."""
+    dim line). The chosen row is filled with the theme's accent, like every selection in the Reader's apps."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.fg, self.bg = QtGui.QColor("#000"), QtGui.QColor("#fff")
+        self.accent, self.on_accent = self.fg, self.bg       # the chosen row's fill and its text
         self.big, self.small = QtGui.QFont(), QtGui.QFont()
 
     def sizeHint(self, option, index):
@@ -3464,7 +3534,7 @@ class RowDelegate(QtWidgets.QStyledItemDelegate):
         p.save()
         r = option.rect.adjusted(22, 10, -22, -10)
         sel = bool(option.state & QtWidgets.QStyle.State_Selected) and not index.data(KIND)
-        fg, bg = (self.bg, self.fg) if sel else (self.fg, self.bg)
+        fg, bg = (self.on_accent, self.accent) if sel else (self.fg, self.bg)
         p.fillRect(option.rect, bg)
         dim = QtGui.QColor(fg)
         dim.setAlphaF(0.6 if sel else 0.55)
@@ -4188,7 +4258,7 @@ class Main(QtWidgets.QMainWindow):
         self.setAcceptDrops(True)
         self.resize(1180, 800)
         self.font_size = int(self.cfg.get("font_size", 13))
-        self.dark = bool(self.cfg.get("dark", False))
+        self.theme = theme_of(self.cfg)
 
         central = QtWidgets.QWidget()
         self.setCentralWidget(central)
@@ -4364,12 +4434,12 @@ class Main(QtWidgets.QMainWindow):
     # ---- look ------------------------------------------------------------------------
 
     def colours(self):
-        return ("#000000", "#ffffff") if self.dark else ("#ffffff", "#000000")
+        """(bg, fg, accent, on_accent) of the current theme."""
+        return palette(self.theme)
 
     def apply_style(self):
-        bg, fg = self.colours()
-        dim = "rgba(255,255,255,0.55)" if self.dark else "rgba(0,0,0,0.55)"
-        rl = "rgba(255,255,255,0.25)" if self.dark else "rgba(0,0,0,0.25)"
+        bg, fg, accent, on_accent = self.colours()
+        dim, rl = rgba(fg, 0.55), rgba(fg, 0.25)
         s = self.font_size
         family = {"serif": "serif", "mono": "monospace"}.get(self.cfg.get("font"), SANS_FAMILY)
         self.setStyleSheet(f"""
@@ -4387,31 +4457,32 @@ class Main(QtWidgets.QMainWindow):
             QLabel#tool {{ color: {dim}; font-size: {s + 2}pt; padding: 0 2px; }}
             QLabel#addtile {{ color: {dim}; border: 1px dashed {dim}; font-size: {s + 3}pt; }}
             QLabel#addtile:hover {{ color: {fg}; border: 1px dashed {fg}; }}
-            QLabel#scan {{ background: {fg}; color: {bg}; font-size: {s + 7}pt; padding: 26px 22px; }}
+            QLabel#scan {{ background: {accent}; color: {on_accent}; font-size: {s + 7}pt; padding: 26px 22px; }}
             QLabel#scanning {{ background: {bg}; color: {fg}; font-size: {s + 7}pt; padding: 25px 21px; border: 1px solid {fg}; }}
             QLabel#placebar {{ color: {dim}; padding: 12px 22px; border-bottom: 1px solid {rl}; }}
             QFrame#sep {{ background: {rl}; }}
             QLineEdit#find {{ border: none; border-bottom: 1px solid {rl}; padding: 14px 22px; }}
             QLineEdit#name {{ border: none; border-bottom: 1px solid {rl}; padding: 8px 0; font-size: {s + 3}pt; }}
             QListWidget#rows {{ background: {bg}; border: none; outline: none; padding: 6px 0; }}
-            QTextEdit {{ background: {bg}; color: {fg}; border: none; font-size: {s + 2}pt; selection-background-color: {fg}; selection-color: {bg}; }}
+            QTextEdit {{ background: {bg}; color: {fg}; border: none; font-size: {s + 2}pt; selection-background-color: {accent}; selection-color: {on_accent}; }}
             QScrollArea {{ border: none; }}
             QScrollBar:vertical {{ background: {bg}; width: 6px; }} QScrollBar::handle:vertical {{ background: {rl}; min-height: 24px; }}
             QScrollBar::add-line, QScrollBar::sub-line {{ height: 0; }} QScrollBar::add-page, QScrollBar::sub-page {{ background: {bg}; }}
             QMenu {{ background: {bg}; color: {fg}; border: 1px solid {rl}; padding: 4px 0; }}
-            QMenu::item {{ padding: 6px 22px; }} QMenu::item:selected {{ background: {fg}; color: {bg}; }}
+            QMenu::item {{ padding: 6px 22px; }} QMenu::item:selected {{ background: {accent}; color: {on_accent}; }}
             QMenu::separator {{ height: 1px; background: {rl}; margin: 4px 0; }}
             QDialog QLineEdit, QComboBox {{ background: {bg}; color: {fg}; border: 1px solid {rl}; padding: 6px; }}
-            QComboBox QAbstractItemView {{ background: {bg}; color: {fg}; selection-background-color: {fg}; selection-color: {bg}; }}
+            QComboBox QAbstractItemView {{ background: {bg}; color: {fg}; selection-background-color: {accent}; selection-color: {on_accent}; }}
             QPushButton {{ background: {bg}; color: {fg}; border: 1px solid {fg}; padding: 6px 18px; }}
-            QPushButton:default {{ background: {fg}; color: {bg}; }}
+            QPushButton:default {{ background: {accent}; color: {on_accent}; border-color: {accent}; }}
             QPushButton#quiet {{ border: none; color: {dim}; padding: 6px 4px; text-align: left; }}
             QPushButton#chip {{ padding: 9px 18px; font-size: {s + 1}pt; }}
-            QPushButton#chip:hover {{ background: {fg}; color: {bg}; }}
+            QPushButton#chip:hover {{ background: {accent}; color: {on_accent}; border-color: {accent}; }}
             QPushButton#chipnew {{ padding: 9px 18px; font-size: {s + 1}pt; border: 1px dashed {dim}; color: {dim}; }}
             QToolTip {{ background: {bg}; color: {fg}; border: 1px solid {rl}; }}
         """)
         self.delegate.fg, self.delegate.bg = QtGui.QColor(fg), QtGui.QColor(bg)
+        self.delegate.accent, self.delegate.on_accent = QtGui.QColor(accent), QtGui.QColor(on_accent)
         big = QtGui.QFont(family)
         big.setPointSize(s + 1)
         big.setWeight(QtGui.QFont.Light)
@@ -4426,8 +4497,13 @@ class Main(QtWidgets.QMainWindow):
         self.list.viewport().update()
 
     def toggle_theme(self):
-        self.dark = not self.dark
-        self.cfg["dark"] = self.dark
+        """The next theme of the cycle: the other ink, then the Plume palettes (Ctrl+T, the ⋯ menu)."""
+        self.set_theme(next_theme(self.theme))
+
+    def set_theme(self, key):
+        self.theme = key if key in THEME_KEYS else DEFAULT_THEME
+        self.cfg["theme"] = self.theme
+        self.cfg["dark"] = is_dark(self.theme)      # what an older version of the app reads
         save_config(self.cfg)
         self.apply_style()
         self.redraw()
@@ -4950,7 +5026,7 @@ class Main(QtWidgets.QMainWindow):
         m.addAction(_("from files…") + "\tCtrl+O", self.import_files)
         if self.configured():
             m.addAction(_("sync now") + "\tF5", self.sync)
-        m.addAction(_("black on white") if self.dark else _("white on black"), self.toggle_theme)
+        m.addAction(_(THEME_LABELS[next_theme(self.theme)]) + "\tCtrl+T", self.toggle_theme)
         m.addAction(_("settings"), self.setup)
         m.exec_(self.more.mapToGlobal(QtCore.QPoint(self.more.width() - m.sizeHint().width(), self.more.height())))
 
