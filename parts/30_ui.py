@@ -248,28 +248,42 @@ FOLDERS = "\x00folders"            # the place: the list of folders
 
 class RowDelegate(QtWidgets.QStyledItemDelegate):
     """The list: folders (a small folder, the name, the count) or documents (the name, then a
-    dim line). The chosen row is filled with the theme's accent, like every selection in the Reader's apps."""
+    dim line). The chosen row is filled with the theme's accent, like every selection in the Reader's apps.
+    With a colour theme every row is a rounded card (tile, press under the mouse); in the two
+    inks the rows are text on the page, set apart by nothing."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.fg, self.bg = QtGui.QColor("#000"), QtGui.QColor("#fff")
         self.accent, self.on_accent = self.fg, self.bg       # the chosen row's fill and its text
+        self.tile, self.press, self.tiles = self.bg, self.bg, False
         self.big, self.small = QtGui.QFont(), QtGui.QFont()
 
     def sizeHint(self, option, index):
         fb, fs = QtGui.QFontMetrics(self.big), QtGui.QFontMetrics(self.small)
+        gap = 6 if self.tiles else 0        # the space between two cards
         if index.data(KIND):
-            return QtCore.QSize(100, fb.height() + 22)
+            return QtCore.QSize(100, fb.height() + 22 + gap)
         if index.data(QtCore.Qt.UserRole) is None:
             return QtCore.QSize(100, fs.height() * 3 + 24)
-        return QtCore.QSize(100, fb.height() + fs.height() + 22)
+        return QtCore.QSize(100, fb.height() + fs.height() + 22 + gap)
 
     def paint(self, p, option, index):
         p.save()
-        r = option.rect.adjusted(22, 10, -22, -10)
         sel = bool(option.state & QtWidgets.QStyle.State_Selected) and not index.data(KIND)
-        fg, bg = (self.on_accent, self.accent) if sel else (self.fg, self.bg)
-        p.fillRect(option.rect, bg)
+        fg = self.on_accent if sel else self.fg
+        if self.tiles and (index.data(KIND) or index.data(QtCore.Qt.UserRole) is not None):
+            # a card: 3 px above and below, 8 px on the sides; the text keeps the page's inset
+            p.fillRect(option.rect, self.bg)
+            hover = bool(option.state & QtWidgets.QStyle.State_MouseOver)
+            p.setRenderHint(QtGui.QPainter.Antialiasing, True)
+            p.setPen(QtCore.Qt.NoPen)
+            p.setBrush(self.accent if sel else self.press if hover else self.tile)
+            p.drawRoundedRect(QtCore.QRectF(option.rect.adjusted(8, 3, -8, -3)), 12, 12)
+            r = option.rect.adjusted(22, 13, -22, -13)
+        else:
+            p.fillRect(option.rect, self.accent if sel else self.bg)
+            r = option.rect.adjusted(22, 10, -22, -10)
         dim = QtGui.QColor(fg)
         dim.setAlphaF(0.6 if sel else 0.55)
         fb, fs = QtGui.QFontMetrics(self.big), QtGui.QFontMetrics(self.small)

@@ -31,7 +31,7 @@ from PIL import Image
 from PyQt5 import QtCore, QtGui, QtWidgets
 
 APP = "readers-scanner"
-VERSION = "1.1.0"
+VERSION = "1.2.0"
 Image.MAX_IMAGE_PIXELS = 200_000_000      # an A3 page at 600 dpi is not an attack
 
 
@@ -40,19 +40,24 @@ Image.MAX_IMAGE_PIXELS = 200_000_000      # an A3 page at 600 dpi is not an atta
 # keyboard in its order. A theme is a background, a text colour, an accent (what is painted
 # "text colour as background" today: the chosen row, the default button, the scan button) and
 # the text on that accent. In the two inks the accent is the text colour, so they look as before.
+# A palette also has tiles: with it, everything that can be clicked (a row, a button, a line
+# edit, a menu) is a rounded card in the palette's « key » colour (tile) on its surface (bg),
+# « press » under the mouse; the chosen row keeps the accent. The two inks have no tiles: text
+# on the page, exactly as before. tile2 is the second tile colour of the phone, kept for the
+# day a desktop app needs two depths.
 # ------------------------------------------------------------------------------------------
 
-PALETTES = [          # key, bg, fg, accent, on_accent
-    ("DARK", "#000000", "#ffffff", "#ffffff", "#000000"),
-    ("LIGHT", "#ffffff", "#000000", "#000000", "#ffffff"),
-    ("LAVANDE", "#1f1a2e", "#f4efff", "#b8a4ff", "#1f1a2e"),
-    ("SAUGE", "#d9e0d4", "#1e2a21", "#4c7a5b", "#ffffff"),
-    ("NORDIQUE", "#2e3440", "#eceff4", "#88c0d0", "#2e3440"),
-    ("TERRACOTTA", "#e6d9cc", "#2b211b", "#c25e38", "#ffffff"),
-    ("COQUETTE", "#f3d9dc", "#4a1f2b", "#d2455e", "#ffffff"),
-    ("MILITANTE", "#f2eee4", "#121212", "#e8412e", "#ffffff"),
-    ("TORRIDE", "#1e0d13", "#f8e9e6", "#e02a50", "#fff4f2"),
-    ("NATURE", "#2b2a24", "#f2efe4", "#d19a4e", "#2b2a24"),
+PALETTES = [          # key, bg, fg, accent, on_accent, tile, tile2, press, tiles
+    ("DARK", "#000000", "#ffffff", "#ffffff", "#000000", "#000000", "#000000", "#000000", False),
+    ("LIGHT", "#ffffff", "#000000", "#000000", "#ffffff", "#ffffff", "#ffffff", "#ffffff", False),
+    ("LAVANDE", "#1f1a2e", "#f4efff", "#b8a4ff", "#1f1a2e", "#3b3352", "#2b2540", "#5a4f78", True),
+    ("SAUGE", "#d9e0d4", "#1e2a21", "#4c7a5b", "#ffffff", "#f7f9f4", "#b5c2b2", "#b5c2b2", True),
+    ("NORDIQUE", "#2e3440", "#eceff4", "#88c0d0", "#2e3440", "#3b4252", "#353b4a", "#4c566a", True),
+    ("TERRACOTTA", "#e6d9cc", "#2b211b", "#c25e38", "#ffffff", "#fcf7f1", "#c8b6a5", "#c8b6a5", True),
+    ("COQUETTE", "#f3d9dc", "#4a1f2b", "#d2455e", "#ffffff", "#fff7f5", "#e7bfc6", "#e7bfc6", True),
+    ("MILITANTE", "#f2eee4", "#121212", "#e8412e", "#ffffff", "#ffffff", "#d8d3c6", "#d8d3c6", True),
+    ("TORRIDE", "#1e0d13", "#f8e9e6", "#e02a50", "#fff4f2", "#561a2c", "#34121d", "#7a2a42", True),
+    ("NATURE", "#2b2a24", "#f2efe4", "#d19a4e", "#2b2a24", "#3a4733", "#2f3a2b", "#566650", True),
 ]
 DEFAULT_THEME = "LIGHT"     # this app has always opened black on white
 THEME_KEYS = [p[0] for p in PALETTES]
@@ -64,7 +69,7 @@ THEME_LABELS = {"DARK": "white on black", "LIGHT": "black on white", "LAVANDE": 
 
 
 def palette(key):
-    """(bg, fg, accent, on_accent) of a theme; an unknown name gives the default."""
+    """(bg, fg, accent, on_accent, tile, tile2, press, tiles) of a theme; an unknown name gives the default."""
     return next((p[1:] for p in PALETTES if p[0] == key), next(p[1:] for p in PALETTES if p[0] == DEFAULT_THEME))
 
 
@@ -3514,28 +3519,42 @@ FOLDERS = "\x00folders"            # the place: the list of folders
 
 class RowDelegate(QtWidgets.QStyledItemDelegate):
     """The list: folders (a small folder, the name, the count) or documents (the name, then a
-    dim line). The chosen row is filled with the theme's accent, like every selection in the Reader's apps."""
+    dim line). The chosen row is filled with the theme's accent, like every selection in the Reader's apps.
+    With a colour theme every row is a rounded card (tile, press under the mouse); in the two
+    inks the rows are text on the page, set apart by nothing."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.fg, self.bg = QtGui.QColor("#000"), QtGui.QColor("#fff")
         self.accent, self.on_accent = self.fg, self.bg       # the chosen row's fill and its text
+        self.tile, self.press, self.tiles = self.bg, self.bg, False
         self.big, self.small = QtGui.QFont(), QtGui.QFont()
 
     def sizeHint(self, option, index):
         fb, fs = QtGui.QFontMetrics(self.big), QtGui.QFontMetrics(self.small)
+        gap = 6 if self.tiles else 0        # the space between two cards
         if index.data(KIND):
-            return QtCore.QSize(100, fb.height() + 22)
+            return QtCore.QSize(100, fb.height() + 22 + gap)
         if index.data(QtCore.Qt.UserRole) is None:
             return QtCore.QSize(100, fs.height() * 3 + 24)
-        return QtCore.QSize(100, fb.height() + fs.height() + 22)
+        return QtCore.QSize(100, fb.height() + fs.height() + 22 + gap)
 
     def paint(self, p, option, index):
         p.save()
-        r = option.rect.adjusted(22, 10, -22, -10)
         sel = bool(option.state & QtWidgets.QStyle.State_Selected) and not index.data(KIND)
-        fg, bg = (self.on_accent, self.accent) if sel else (self.fg, self.bg)
-        p.fillRect(option.rect, bg)
+        fg = self.on_accent if sel else self.fg
+        if self.tiles and (index.data(KIND) or index.data(QtCore.Qt.UserRole) is not None):
+            # a card: 3 px above and below, 8 px on the sides; the text keeps the page's inset
+            p.fillRect(option.rect, self.bg)
+            hover = bool(option.state & QtWidgets.QStyle.State_MouseOver)
+            p.setRenderHint(QtGui.QPainter.Antialiasing, True)
+            p.setPen(QtCore.Qt.NoPen)
+            p.setBrush(self.accent if sel else self.press if hover else self.tile)
+            p.drawRoundedRect(QtCore.QRectF(option.rect.adjusted(8, 3, -8, -3)), 12, 12)
+            r = option.rect.adjusted(22, 13, -22, -13)
+        else:
+            p.fillRect(option.rect, self.accent if sel else self.bg)
+            r = option.rect.adjusted(22, 10, -22, -10)
         dim = QtGui.QColor(fg)
         dim.setAlphaF(0.6 if sel else 0.55)
         fb, fs = QtGui.QFontMetrics(self.big), QtGui.QFontMetrics(self.small)
@@ -4290,6 +4309,7 @@ class Main(QtWidgets.QMainWindow):
         self.list.setSelectionMode(QtWidgets.QAbstractItemView.ExtendedSelection)
         self.delegate = RowDelegate(self.list)
         self.list.setItemDelegate(self.delegate)
+        self.list.viewport().setAttribute(QtCore.Qt.WA_Hover, True)      # a card under the mouse shows it
         self.list.currentItemChanged.connect(self.list_moved)
         self.list.itemClicked.connect(self.item_clicked)
         self.list.itemActivated.connect(self.item_activated)
@@ -4300,6 +4320,7 @@ class Main(QtWidgets.QMainWindow):
         choices = QtWidgets.QVBoxLayout()
         choices.setContentsMargins(22, 10, 22, 10)
         choices.setSpacing(4)
+        self.choices_box = choices
         self.choice = {}
         for key, pick in (("source", self.pick_source), ("look", self.pick_look), ("lang", self.pick_lang)):
             c = Clickable("", "choice")
@@ -4434,15 +4455,15 @@ class Main(QtWidgets.QMainWindow):
     # ---- look ------------------------------------------------------------------------
 
     def colours(self):
-        """(bg, fg, accent, on_accent) of the current theme."""
+        """(bg, fg, accent, on_accent, tile, tile2, press, tiles) of the current theme."""
         return palette(self.theme)
 
     def apply_style(self):
-        bg, fg, accent, on_accent = self.colours()
+        bg, fg, accent, on_accent, tile, tile2, press, tiles = self.colours()
         dim, rl = rgba(fg, 0.55), rgba(fg, 0.25)
         s = self.font_size
         family = {"serif": "serif", "mono": "monospace"}.get(self.cfg.get("font"), SANS_FAMILY)
-        self.setStyleSheet(f"""
+        sheet = f"""
             QMainWindow, QWidget {{ background: {bg}; color: {fg}; font-family: "{family}"; font-size: {s}pt; font-weight: 300; }}
             QLabel#dim {{ color: {dim}; }}
             QLabel#title {{ font-size: {s + 3}pt; }}
@@ -4480,9 +4501,47 @@ class Main(QtWidgets.QMainWindow):
             QPushButton#chip:hover {{ background: {accent}; color: {on_accent}; border-color: {accent}; }}
             QPushButton#chipnew {{ padding: 9px 18px; font-size: {s + 1}pt; border: 1px dashed {dim}; color: {dim}; }}
             QToolTip {{ background: {bg}; color: {fg}; border: 1px solid {rl}; }}
-        """)
+        """
+        if tiles:
+            # a colour theme: everything that can be clicked is a rounded card in the palette's
+            # « key » colour on its surface, « press » under the mouse, the accent for the chosen
+            # row, the default button and « scan »; rules become space; what only reads stays on
+            # the surface (the title, the dim lines, the pages, the text, the links in dim)
+            sheet += f"""
+            QLabel#choice {{ background: {tile}; border-radius: 10px; padding: 8px 14px; }}
+            QLabel#choice:hover {{ background: {press}; }}
+            QLabel#action {{ background: {tile}; border-radius: 10px; padding: 8px 18px; }}
+            QLabel#action:hover {{ background: {press}; }}
+            QLabel#scan {{ border-radius: 12px; margin: 4px 8px; }}
+            QLabel#scanning {{ background: {tile}; border: none; border-radius: 12px; margin: 4px 8px; padding: 26px 22px; }}
+            QLabel#placebar {{ border-bottom: none; }}
+            QFrame#sep {{ background: {bg}; }}
+            QLineEdit#find {{ background: {tile}; border: none; border-radius: 10px; margin: 3px 8px; padding: 10px 14px; }}
+            QLineEdit#name {{ background: {tile}; border: none; border-radius: 10px; padding: 8px 14px; }}
+            QMenu {{ background: {tile}; border: none; padding: 6px; }}
+            QMenu::item {{ padding: 8px 18px; border-radius: 8px; }}
+            QMenu::separator {{ height: 1px; background: {press}; margin: 4px 8px; }}
+            QDialog QLineEdit, QComboBox {{ background: {tile}; border: none; border-radius: 10px; padding: 8px 12px; }}
+            QComboBox QAbstractItemView {{ background: {tile}; border: none; }}
+            QComboBox::drop-down {{ border: none; width: 24px; }}
+            QComboBox::down-arrow {{ image: url({self.arrow(fg).replace(chr(92), '/')}); width: 10px; height: 6px; }}
+            QPushButton {{ background: {tile}; border: none; border-radius: 10px; padding: 8px 18px; }}
+            QPushButton:hover {{ background: {press}; }}
+            QPushButton:default {{ background: {accent}; color: {on_accent}; }}
+            QPushButton#quiet, QPushButton#quiet:hover {{ background: transparent; border-radius: 0; padding: 6px 4px; }}
+            QPushButton#chip {{ padding: 10px 18px; }}
+            QPushButton#chip:hover {{ background: {press}; color: {fg}; }}
+            QPushButton#chip:default {{ background: {accent}; color: {on_accent}; }}
+            QPushButton#chipnew {{ background: transparent; border: 1px dashed {dim}; border-radius: 10px; padding: 9px 18px; }}
+            QPushButton#chipnew:hover {{ background: {press}; }}
+            QToolTip {{ background: {tile}; border: none; padding: 6px 8px; }}
+            """
+        self.setStyleSheet(sheet)
+        self.choices_box.setContentsMargins(8 if tiles else 22, 10, 8 if tiles else 22, 10)     # the cards reach the rows' edge
+        self.choices_box.setSpacing(6 if tiles else 4)
         self.delegate.fg, self.delegate.bg = QtGui.QColor(fg), QtGui.QColor(bg)
         self.delegate.accent, self.delegate.on_accent = QtGui.QColor(accent), QtGui.QColor(on_accent)
+        self.delegate.tile, self.delegate.press, self.delegate.tiles = QtGui.QColor(tile), QtGui.QColor(press), tiles
         big = QtGui.QFont(family)
         big.setPointSize(s + 1)
         big.setWeight(QtGui.QFont.Light)
@@ -4495,6 +4554,24 @@ class Main(QtWidgets.QMainWindow):
             l.setFixedWidth(max(300, s * 25) - 22 - 16 - 34)
         self.list.doItemsLayout()
         self.list.viewport().update()
+
+    def arrow(self, fg):
+        """The combo boxes' arrow with tiles: a small triangle in the text colour, faded, as a picture
+        (a styled drop-down draws none of its own). Returns the file's path."""
+        os.makedirs(CONFIG_DIR, exist_ok=True)
+        path = os.path.join(CONFIG_DIR, "arrow.png")
+        img = QtGui.QImage(10, 6, QtGui.QImage.Format_ARGB32)
+        img.fill(0)
+        colour = QtGui.QColor(fg)
+        colour.setAlphaF(0.7)
+        pa = QtGui.QPainter(img)
+        pa.setRenderHint(QtGui.QPainter.Antialiasing, True)
+        pa.setPen(QtCore.Qt.NoPen)
+        pa.setBrush(colour)
+        pa.drawPolygon(QtGui.QPolygonF([QtCore.QPointF(0, 0), QtCore.QPointF(10, 0), QtCore.QPointF(5, 6)]))
+        pa.end()
+        img.save(path)
+        return path
 
     def toggle_theme(self):
         """The next theme of the cycle: the other ink, then the Plume palettes (Ctrl+T, the ⋯ menu)."""

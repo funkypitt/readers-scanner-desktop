@@ -89,6 +89,7 @@ class Main(QtWidgets.QMainWindow):
         self.list.setSelectionMode(QtWidgets.QAbstractItemView.ExtendedSelection)
         self.delegate = RowDelegate(self.list)
         self.list.setItemDelegate(self.delegate)
+        self.list.viewport().setAttribute(QtCore.Qt.WA_Hover, True)      # a card under the mouse shows it
         self.list.currentItemChanged.connect(self.list_moved)
         self.list.itemClicked.connect(self.item_clicked)
         self.list.itemActivated.connect(self.item_activated)
@@ -99,6 +100,7 @@ class Main(QtWidgets.QMainWindow):
         choices = QtWidgets.QVBoxLayout()
         choices.setContentsMargins(22, 10, 22, 10)
         choices.setSpacing(4)
+        self.choices_box = choices
         self.choice = {}
         for key, pick in (("source", self.pick_source), ("look", self.pick_look), ("lang", self.pick_lang)):
             c = Clickable("", "choice")
@@ -233,15 +235,15 @@ class Main(QtWidgets.QMainWindow):
     # ---- look ------------------------------------------------------------------------
 
     def colours(self):
-        """(bg, fg, accent, on_accent) of the current theme."""
+        """(bg, fg, accent, on_accent, tile, tile2, press, tiles) of the current theme."""
         return palette(self.theme)
 
     def apply_style(self):
-        bg, fg, accent, on_accent = self.colours()
+        bg, fg, accent, on_accent, tile, tile2, press, tiles = self.colours()
         dim, rl = rgba(fg, 0.55), rgba(fg, 0.25)
         s = self.font_size
         family = {"serif": "serif", "mono": "monospace"}.get(self.cfg.get("font"), SANS_FAMILY)
-        self.setStyleSheet(f"""
+        sheet = f"""
             QMainWindow, QWidget {{ background: {bg}; color: {fg}; font-family: "{family}"; font-size: {s}pt; font-weight: 300; }}
             QLabel#dim {{ color: {dim}; }}
             QLabel#title {{ font-size: {s + 3}pt; }}
@@ -279,9 +281,47 @@ class Main(QtWidgets.QMainWindow):
             QPushButton#chip:hover {{ background: {accent}; color: {on_accent}; border-color: {accent}; }}
             QPushButton#chipnew {{ padding: 9px 18px; font-size: {s + 1}pt; border: 1px dashed {dim}; color: {dim}; }}
             QToolTip {{ background: {bg}; color: {fg}; border: 1px solid {rl}; }}
-        """)
+        """
+        if tiles:
+            # a colour theme: everything that can be clicked is a rounded card in the palette's
+            # « key » colour on its surface, « press » under the mouse, the accent for the chosen
+            # row, the default button and « scan »; rules become space; what only reads stays on
+            # the surface (the title, the dim lines, the pages, the text, the links in dim)
+            sheet += f"""
+            QLabel#choice {{ background: {tile}; border-radius: 10px; padding: 8px 14px; }}
+            QLabel#choice:hover {{ background: {press}; }}
+            QLabel#action {{ background: {tile}; border-radius: 10px; padding: 8px 18px; }}
+            QLabel#action:hover {{ background: {press}; }}
+            QLabel#scan {{ border-radius: 12px; margin: 4px 8px; }}
+            QLabel#scanning {{ background: {tile}; border: none; border-radius: 12px; margin: 4px 8px; padding: 26px 22px; }}
+            QLabel#placebar {{ border-bottom: none; }}
+            QFrame#sep {{ background: {bg}; }}
+            QLineEdit#find {{ background: {tile}; border: none; border-radius: 10px; margin: 3px 8px; padding: 10px 14px; }}
+            QLineEdit#name {{ background: {tile}; border: none; border-radius: 10px; padding: 8px 14px; }}
+            QMenu {{ background: {tile}; border: none; padding: 6px; }}
+            QMenu::item {{ padding: 8px 18px; border-radius: 8px; }}
+            QMenu::separator {{ height: 1px; background: {press}; margin: 4px 8px; }}
+            QDialog QLineEdit, QComboBox {{ background: {tile}; border: none; border-radius: 10px; padding: 8px 12px; }}
+            QComboBox QAbstractItemView {{ background: {tile}; border: none; }}
+            QComboBox::drop-down {{ border: none; width: 24px; }}
+            QComboBox::down-arrow {{ image: url({self.arrow(fg).replace(chr(92), '/')}); width: 10px; height: 6px; }}
+            QPushButton {{ background: {tile}; border: none; border-radius: 10px; padding: 8px 18px; }}
+            QPushButton:hover {{ background: {press}; }}
+            QPushButton:default {{ background: {accent}; color: {on_accent}; }}
+            QPushButton#quiet, QPushButton#quiet:hover {{ background: transparent; border-radius: 0; padding: 6px 4px; }}
+            QPushButton#chip {{ padding: 10px 18px; }}
+            QPushButton#chip:hover {{ background: {press}; color: {fg}; }}
+            QPushButton#chip:default {{ background: {accent}; color: {on_accent}; }}
+            QPushButton#chipnew {{ background: transparent; border: 1px dashed {dim}; border-radius: 10px; padding: 9px 18px; }}
+            QPushButton#chipnew:hover {{ background: {press}; }}
+            QToolTip {{ background: {tile}; border: none; padding: 6px 8px; }}
+            """
+        self.setStyleSheet(sheet)
+        self.choices_box.setContentsMargins(8 if tiles else 22, 10, 8 if tiles else 22, 10)     # the cards reach the rows' edge
+        self.choices_box.setSpacing(6 if tiles else 4)
         self.delegate.fg, self.delegate.bg = QtGui.QColor(fg), QtGui.QColor(bg)
         self.delegate.accent, self.delegate.on_accent = QtGui.QColor(accent), QtGui.QColor(on_accent)
+        self.delegate.tile, self.delegate.press, self.delegate.tiles = QtGui.QColor(tile), QtGui.QColor(press), tiles
         big = QtGui.QFont(family)
         big.setPointSize(s + 1)
         big.setWeight(QtGui.QFont.Light)
@@ -294,6 +334,24 @@ class Main(QtWidgets.QMainWindow):
             l.setFixedWidth(max(300, s * 25) - 22 - 16 - 34)
         self.list.doItemsLayout()
         self.list.viewport().update()
+
+    def arrow(self, fg):
+        """The combo boxes' arrow with tiles: a small triangle in the text colour, faded, as a picture
+        (a styled drop-down draws none of its own). Returns the file's path."""
+        os.makedirs(CONFIG_DIR, exist_ok=True)
+        path = os.path.join(CONFIG_DIR, "arrow.png")
+        img = QtGui.QImage(10, 6, QtGui.QImage.Format_ARGB32)
+        img.fill(0)
+        colour = QtGui.QColor(fg)
+        colour.setAlphaF(0.7)
+        pa = QtGui.QPainter(img)
+        pa.setRenderHint(QtGui.QPainter.Antialiasing, True)
+        pa.setPen(QtCore.Qt.NoPen)
+        pa.setBrush(colour)
+        pa.drawPolygon(QtGui.QPolygonF([QtCore.QPointF(0, 0), QtCore.QPointF(10, 0), QtCore.QPointF(5, 6)]))
+        pa.end()
+        img.save(path)
+        return path
 
     def toggle_theme(self):
         """The next theme of the cycle: the other ink, then the Plume palettes (Ctrl+T, the ⋯ menu)."""

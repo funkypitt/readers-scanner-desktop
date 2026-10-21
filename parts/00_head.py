@@ -31,7 +31,7 @@ from PIL import Image
 from PyQt5 import QtCore, QtGui, QtWidgets
 
 APP = "readers-scanner"
-VERSION = "1.1.0"
+VERSION = "1.2.0"
 Image.MAX_IMAGE_PIXELS = 200_000_000      # an A3 page at 600 dpi is not an attack
 
 
@@ -40,19 +40,24 @@ Image.MAX_IMAGE_PIXELS = 200_000_000      # an A3 page at 600 dpi is not an atta
 # keyboard in its order. A theme is a background, a text colour, an accent (what is painted
 # "text colour as background" today: the chosen row, the default button, the scan button) and
 # the text on that accent. In the two inks the accent is the text colour, so they look as before.
+# A palette also has tiles: with it, everything that can be clicked (a row, a button, a line
+# edit, a menu) is a rounded card in the palette's « key » colour (tile) on its surface (bg),
+# « press » under the mouse; the chosen row keeps the accent. The two inks have no tiles: text
+# on the page, exactly as before. tile2 is the second tile colour of the phone, kept for the
+# day a desktop app needs two depths.
 # ------------------------------------------------------------------------------------------
 
-PALETTES = [          # key, bg, fg, accent, on_accent
-    ("DARK", "#000000", "#ffffff", "#ffffff", "#000000"),
-    ("LIGHT", "#ffffff", "#000000", "#000000", "#ffffff"),
-    ("LAVANDE", "#1f1a2e", "#f4efff", "#b8a4ff", "#1f1a2e"),
-    ("SAUGE", "#d9e0d4", "#1e2a21", "#4c7a5b", "#ffffff"),
-    ("NORDIQUE", "#2e3440", "#eceff4", "#88c0d0", "#2e3440"),
-    ("TERRACOTTA", "#e6d9cc", "#2b211b", "#c25e38", "#ffffff"),
-    ("COQUETTE", "#f3d9dc", "#4a1f2b", "#d2455e", "#ffffff"),
-    ("MILITANTE", "#f2eee4", "#121212", "#e8412e", "#ffffff"),
-    ("TORRIDE", "#1e0d13", "#f8e9e6", "#e02a50", "#fff4f2"),
-    ("NATURE", "#2b2a24", "#f2efe4", "#d19a4e", "#2b2a24"),
+PALETTES = [          # key, bg, fg, accent, on_accent, tile, tile2, press, tiles
+    ("DARK", "#000000", "#ffffff", "#ffffff", "#000000", "#000000", "#000000", "#000000", False),
+    ("LIGHT", "#ffffff", "#000000", "#000000", "#ffffff", "#ffffff", "#ffffff", "#ffffff", False),
+    ("LAVANDE", "#1f1a2e", "#f4efff", "#b8a4ff", "#1f1a2e", "#3b3352", "#2b2540", "#5a4f78", True),
+    ("SAUGE", "#d9e0d4", "#1e2a21", "#4c7a5b", "#ffffff", "#f7f9f4", "#b5c2b2", "#b5c2b2", True),
+    ("NORDIQUE", "#2e3440", "#eceff4", "#88c0d0", "#2e3440", "#3b4252", "#353b4a", "#4c566a", True),
+    ("TERRACOTTA", "#e6d9cc", "#2b211b", "#c25e38", "#ffffff", "#fcf7f1", "#c8b6a5", "#c8b6a5", True),
+    ("COQUETTE", "#f3d9dc", "#4a1f2b", "#d2455e", "#ffffff", "#fff7f5", "#e7bfc6", "#e7bfc6", True),
+    ("MILITANTE", "#f2eee4", "#121212", "#e8412e", "#ffffff", "#ffffff", "#d8d3c6", "#d8d3c6", True),
+    ("TORRIDE", "#1e0d13", "#f8e9e6", "#e02a50", "#fff4f2", "#561a2c", "#34121d", "#7a2a42", True),
+    ("NATURE", "#2b2a24", "#f2efe4", "#d19a4e", "#2b2a24", "#3a4733", "#2f3a2b", "#566650", True),
 ]
 DEFAULT_THEME = "LIGHT"     # this app has always opened black on white
 THEME_KEYS = [p[0] for p in PALETTES]
@@ -64,7 +69,7 @@ THEME_LABELS = {"DARK": "white on black", "LIGHT": "black on white", "LAVANDE": 
 
 
 def palette(key):
-    """(bg, fg, accent, on_accent) of a theme; an unknown name gives the default."""
+    """(bg, fg, accent, on_accent, tile, tile2, press, tiles) of a theme; an unknown name gives the default."""
     return next((p[1:] for p in PALETTES if p[0] == key), next(p[1:] for p in PALETTES if p[0] == DEFAULT_THEME))
 
 
