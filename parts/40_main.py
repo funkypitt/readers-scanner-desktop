@@ -226,8 +226,7 @@ class Main(QtWidgets.QMainWindow):
         self.update_status()
         if self.configured():
             QtCore.QTimer.singleShot(0, self.sync)
-        if not self.cfg.get("device"):
-            QtCore.QTimer.singleShot(0, self.find_scanner)
+        QtCore.QTimer.singleShot(0, self.find_scanner)     # the same scanner may be at another address today
 
     def configured(self):
         return bool(self.cfg.get("server"))
@@ -932,20 +931,27 @@ class Main(QtWidgets.QMainWindow):
     # ---- scanning ----------------------------------------------------------------------
 
     def find_scanner(self):
+        """At every start, in the background: the quick look (a moment for a scanner that answers
+        by itself; NAPS2 asked only when none does). The scanner that answers takes the place of
+        the one remembered — the same model in another place has another address, and the app
+        would otherwise learn it at the first scan, after a failure. None answers: what was
+        remembered stays. The « scan » button is not held: a scan meanwhile keeps its own account
+        of the ways, and writes it after this one."""
         if self.searching:
             return
         self.searching = True
         self.update_status()
+        naps2 = self.naps2
 
         def found(devices):
             self.searching = False
-            routes = pick_routes(devices, None)
-            if routes:
-                self.cfg["device"] = {"key": routes[0]["key"], "name": routes[0]["name"], "routes": routes}
+            device = found_again(self.cfg.get("device"), devices, naps2.asked_all)
+            if device:
+                self.cfg["device"] = device
                 save_config(self.cfg)
             self.update_status()
 
-        self.run(lambda say: self.naps2.devices(every=False), found, lambda m: found([]))
+        self.run(lambda say: naps2.devices(every=False), found, lambda m: found([]))
 
     def scan(self):
         if self.scanning:
@@ -1336,7 +1342,7 @@ class Main(QtWidgets.QMainWindow):
 
     def update_status(self):
         device = (self.cfg.get("device") or {}).get("name")
-        if self.searching:
+        if self.searching and not device:      # a scanner remembered keeps its name while it is looked for again
             scanner = _("looking for the scanner…")
         elif device:
             scanner = re.sub(r"\s+\([^()]*\)$", "", device)

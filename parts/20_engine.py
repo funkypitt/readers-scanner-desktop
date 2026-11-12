@@ -995,3 +995,26 @@ def pick_routes(devices, key):
         return []
     key = key if key and any(d["key"] == key for d in devices) else devices[0]["key"]
     return [d for d in devices if d["key"] == key]
+
+
+def found_again(device, devices, asked_all=False):
+    """The scanner to use after a look at the start (`device`: the one remembered, `devices`:
+    what the look found, `asked_all`: were NAPS2's ways looked for too?). Returns the new
+    device, or None when nothing answers: then what was remembered stays. The same model in two
+    places has two addresses: the one remembered is preferred by its key, then by its UUID when
+    two of that model answer; another scanner of the model takes its place with a clean slate.
+    The ways found replace those remembered; a way's misses follow it when it is the same
+    scanner, and NAPS2's ways, which the quick look does not ask for, stay with that scanner."""
+    before = list((device or {}).get("routes") or [])
+    routes = pick_routes(devices, (device or {}).get("key"))
+    if not routes:
+        return None
+    uuids = {r["uuid"] for r in before if r.get("uuid")}
+    if len({r["uuid"] for r in routes if r.get("uuid")}) > 1 and any(r.get("uuid") in uuids for r in routes):
+        routes = [r for r in routes if not r.get("uuid") or r["uuid"] in uuids]
+    same = not uuids or any(r.get("uuid") in uuids for r in routes)
+    for r in routes:
+        r["misses"] = next((x.get("misses", 0) for x in before if same and r.get("id") and x.get("id") == r["id"]), 0)
+    kept = [x for x in before if not x.get("url") and x.get("key") == routes[0]["key"]] if same and not asked_all else []
+    routes = sorted(routes + kept, key=way_order)
+    return {"key": routes[0]["key"], "name": routes[0]["name"], "routes": routes}

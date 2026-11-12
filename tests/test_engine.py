@@ -237,6 +237,42 @@ check("so the sheet fed upside down is seen", turn == {r["files"][0]: 180}, str(
 whole = TMP + "/whole.jpg"
 shutil.copyfile(PAGES + "/facture-1.jpg", whole)
 check("a whole and light picture is left as it is, byte for byte", rs.jpeg_mend(whole) is None and rs.jpeg_slim(whole, 300) == 0 and open(whole, "rb").read() == open(PAGES + "/facture-1.jpg", "rb").read())
+# the settings as the scanner must read them, and a scanner that reads them badly
+body, asked_dpi, offered = rs.Escl(url)._settings("feeder", "A4", 300)
+check("the settings begin with the element itself: no XML declaration before it", body.startswith("<scan:ScanSettings") and "<?xml" not in body and asked_dpi == 300 and 200 in offered, body[:60])
+scanner(feeder=["facture-1.jpg", "facture-2.jpg"], glass="contrat.jpg", flags=["brother"])
+r = rs.scan_pages(d, known, "feeder", out)
+check("as the Brother MFC-J6955DW, asked as the app asks now: the feeder, both sheets at 300 dpi", r["error"] is None and r["source"] == "feeder"
+      and [Image.open(f).size for f in r["files"]] == [(2480, 3508)] * 2 and "POST /eSCL/ScanJobs Feeder 300" in asked(), f"{r} {asked()}")
+settings = rs.Escl._settings
+rs.Escl._settings = lambda self, *a: ('<?xml version="1.0" encoding="UTF-8"?>\n' + settings(self, *a)[0],) + settings(self, *a)[1:]
+scanner(feeder=["facture-1.jpg", "facture-2.jpg"], glass="contrat.jpg", flags=["brother"])
+r = rs.scan_pages(d, known, "feeder", out)
+rs.Escl._settings = settings
+with Image.open(r["files"][0]) as im:
+    got = (im.size, im.info.get("dpi"))
+check("asked with a declaration, as before 1.2.1: it ignores the settings — the glass at 200 dpi; the file keeps its true resolution, and the trouble is written down",
+      r["error"] is None and len(r["files"]) == 1 and got == ((1653, 2338), (200, 200)) and any("ignored the settings" in l for l in d.heard), f"{r} {got} {d.heard[-2:]}")
+
+# the same model in two places: at the start, the scanner that answers takes the place of the one remembered
+hp = lambda url, uuid, **k: dict({"id": url, "url": url, "name": "HP ScanJet Pro 4500 fn1", "backend": "direct", "key": "scanjetpro4500fn1", "uuid": uuid, "link": "net", "feeder": True, "duplex": True}, **k)
+naps = {"id": "airscan:e0:HP ScanJet Pro 4500 fn1", "url": None, "name": "HP ScanJet Pro 4500 fn1", "backend": "airscan", "key": "scanjetpro4500fn1", "misses": 1}
+home = {"key": "scanjetpro4500fn1", "name": "HP ScanJet Pro 4500 fn1", "routes": [hp("http://192.168.1.120:80", "A", misses=1), naps]}
+check("nothing answers: what was remembered stays", rs.found_again(home, []) is None and rs.found_again(None, []) is None)
+again = rs.found_again(home, [hp("http://192.168.1.120:80", "A")])
+check("the same scanner at the same address: its way found again, its misses and NAPS2's way kept", [x["id"] for x in again["routes"]] == ["http://192.168.1.120:80", naps["id"]]
+      and [x["misses"] for x in again["routes"]] == [1, 1], str(again))
+again = rs.found_again(home, [hp("http://10.0.0.7:80", "B")])
+check("the same model elsewhere (another UUID, another address): it takes the place, nothing of the other is kept", [x["id"] for x in again["routes"]] == ["http://10.0.0.7:80"] and again["routes"][0]["misses"] == 0, str(again))
+again = rs.found_again(home, [hp("http://10.0.0.7:80", "B"), hp("http://10.0.0.8:80", "A")])
+check("two of the model answer: the one remembered, by its UUID", [x["uuid"] for x in again["routes"] if x.get("uuid")] == ["A"], str(again))
+other = dict(hp("http://10.0.0.9:80", "C"), name="Brother MFC-J6955DW", key="mfcj6955dw")
+again = rs.found_again(home, [other, hp("http://10.0.0.8:80", "A")])
+check("two scanners answer: the one remembered rather than the first found", again["key"] == "scanjetpro4500fn1" and again["name"] == "HP ScanJet Pro 4500 fn1", str(again))
+again = rs.found_again(home, [other])
+check("only another scanner answers: it is taken", again["key"] == "mfcj6955dw" and again["routes"] == [dict(other, misses=0)], str(again))
+check("every way looked for (NAPS2 asked too): NAPS2's remembered way is not kept on trust",
+      rs.found_again(home, [hp("http://192.168.1.120:80", "A")], asked_all=True)["routes"] == [dict(hp("http://192.168.1.120:80", "A"), misses=1)])
 
 # plugged in and on the network: two ways to one scanner
 cable = url.replace("127.0.0.1", "localhost")

@@ -5,8 +5,9 @@
 > (free, open source), which is not installed with the app: on Linux it reaches them through
 > SANE, on Windows through WIA or TWAIN, on macOS through Apple's drivers.
 >
-> **What it was tried on**: one real scanner, an HP ScanJet Pro 4500 fn1 on Linux, by USB and on
-> the network (feeder, both sides, glass). The Windows and macOS builds pass the same tests on
+> **What it was tried on**: two real scanners on Linux, an HP ScanJet Pro 4500 fn1 by USB and on
+> the network (feeder, both sides, glass), and a Brother MFC-J6955DW on the network (feeder,
+> glass; it ignored every setting until 1.2.1). The Windows and macOS builds pass the same tests on
 > GitHub's machines, which have no scanner: no scan has been made with them yet. If yours
 > misbehaves, [say so](https://github.com/funkypitt/readers-scanner-desktop/issues).
 

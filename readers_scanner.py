@@ -31,7 +31,7 @@ from PIL import Image
 from PyQt5 import QtCore, QtGui, QtWidgets
 
 APP = "readers-scanner"
-VERSION = "1.2.0"
+VERSION = "1.2.1"
 Image.MAX_IMAGE_PIXELS = 200_000_000      # an A3 page at 600 dpi is not an attack
 
 
@@ -2899,6 +2899,29 @@ def pick_routes(devices, key):
         return []
     key = key if key and any(d["key"] == key for d in devices) else devices[0]["key"]
     return [d for d in devices if d["key"] == key]
+
+
+def found_again(device, devices, asked_all=False):
+    """The scanner to use after a look at the start (`device`: the one remembered, `devices`:
+    what the look found, `asked_all`: were NAPS2's ways looked for too?). Returns the new
+    device, or None when nothing answers: then what was remembered stays. The same model in two
+    places has two addresses: the one remembered is preferred by its key, then by its UUID when
+    two of that model answer; another scanner of the model takes its place with a clean slate.
+    The ways found replace those remembered; a way's misses follow it when it is the same
+    scanner, and NAPS2's ways, which the quick look does not ask for, stay with that scanner."""
+    before = list((device or {}).get("routes") or [])
+    routes = pick_routes(devices, (device or {}).get("key"))
+    if not routes:
+        return None
+    uuids = {r["uuid"] for r in before if r.get("uuid")}
+    if len({r["uuid"] for r in routes if r.get("uuid")}) > 1 and any(r.get("uuid") in uuids for r in routes):
+        routes = [r for r in routes if not r.get("uuid") or r["uuid"] in uuids]
+    same = not uuids or any(r.get("uuid") in uuids for r in routes)
+    for r in routes:
+        r["misses"] = next((x.get("misses", 0) for x in before if same and r.get("id") and x.get("id") == r["id"]), 0)
+    kept = [x for x in before if not x.get("url") and x.get("key") == routes[0]["key"]] if same and not asked_all else []
+    routes = sorted(routes + kept, key=way_order)
+    return {"key": routes[0]["key"], "name": routes[0]["name"], "routes": routes}
 # ------------------------------------------------------------------------------------------
 # Scanners asked directly. Most scanners sold since about 2015 speak eSCL (« AirScan »,
 # « Mopria »): HTTP and a little XML, over the network, or over USB through ipp-usb on Linux.
@@ -3096,8 +3119,10 @@ class Escl:
         dpi = dpi if dpi in box["dpi"] or not box["dpi"] else min(box["dpi"], key=lambda d: (abs(d - dpi), -d))
         mode = "RGB24" if "RGB24" in box["modes"] or not box["modes"] else box["modes"][0]
         ext = float(caps["version"]) >= 2.1 if re.fullmatch(r"\d+(\.\d+)?", caps["version"]) else False
-        return ('<?xml version="1.0" encoding="UTF-8"?>\n'
-                f'<scan:ScanSettings xmlns:scan="{ESCL_NS["scan"]}" xmlns:pwg="{ESCL_NS["pwg"]}">'
+        # No XML declaration before the settings: with one, a Brother MFC-J6955DW answered 201 and
+        # ignored every setting (the glass at 200 dpi whatever was asked, 2026-11-12). sane-airscan,
+        # which that scanner obeys, sends none either.
+        return (f'<scan:ScanSettings xmlns:scan="{ESCL_NS["scan"]}" xmlns:pwg="{ESCL_NS["pwg"]}">'
                 f'<pwg:Version>{caps["version"]}</pwg:Version>'
                 '<pwg:ScanRegions><pwg:ScanRegion><pwg:ContentRegionUnits>escl:ThreeHundredthsOfInches</pwg:ContentRegionUnits>'
                 f'<pwg:XOffset>0</pwg:XOffset><pwg:YOffset>0</pwg:YOffset><pwg:Width>{width}</pwg:Width><pwg:Height>{height}</pwg:Height>'
@@ -3108,7 +3133,21 @@ class Escl:
                 + ('<scan:DocumentFormatExt>image/jpeg</scan:DocumentFormatExt>' if ext else '')
                 + f'<scan:XResolution>{dpi}</scan:XResolution><scan:YResolution>{dpi}</scan:YResolution>'
                 + (f'<scan:Duplex>{"true" if source == "duplex" else "false"}</scan:Duplex>' if source != "glass" else '')
-                + '</scan:ScanSettings>'), dpi
+                + '</scan:ScanSettings>'), dpi, box["dpi"]
+
+    @staticmethod
+    def _dpi_of(path, asked, offered):
+        """The resolution of a page received: the one asked for, unless the file itself names
+        another that the scanner offers. A scanner that ignored the settings sends its default
+        resolution; writing the one asked for over it would give the PDF a page of the wrong
+        size, and hide that the settings were ignored."""
+        try:
+            with Image.open(path) as im:
+                found = im.info.get("dpi")
+        except (OSError, ValueError):
+            return asked
+        found = int(round(found[0])) if found and found[0] and found[0] == found[1] else None
+        return found if found and found != asked and found in offered else asked
 
     def scan(self, source, pagesize, out_dir, on_page=None, dpi=None):
         """One scan from one source ("glass", "feeder", "duplex"). Returns (page files, error code
@@ -3122,7 +3161,8 @@ class Escl:
             state, adf = self.status()     # is it there at all? a cable pulled out is known in a moment
             if source != "glass" and adf in _ADF_STATES:
                 return [], _ADF_STATES[adf], adf
-            body, dpi = self._settings(source, pagesize, dpi)
+            body, dpi, offered = self._settings(source, pagesize, dpi)
+            words = ""
             for patience in range(8):
                 try:
                     r = self.http.post(self.url + "/eSCL/ScanJobs", data=body.encode("utf-8"), headers={"Content-Type": "text/xml"}, timeout=(3, 30))
@@ -3151,9 +3191,12 @@ class Escl:
                     out = os.path.join(out_dir, f"p{len(files) + 1:04d}.jpg")
                     with open(out, "wb") as f:
                         f.write(page.content)
-                    self._stamp(out, dpi)
+                    real = self._dpi_of(out, dpi, offered)
+                    if real != dpi:
+                        words = f"{real} dpi received where {dpi} were asked: the scanner ignored the settings"
+                    self._stamp(out, real)
                     jpeg_mend(out)
-                    jpeg_slim(out, dpi)
+                    jpeg_slim(out, real)
                     files.append(out)
                     quiet_tries = 0
                     on_page and on_page(len(files))
@@ -3167,7 +3210,7 @@ class Escl:
             if self._cancelled:
                 return [], "cancelled", ""
             if files:
-                return files, None, ""
+                return files, None, words
             reasons = self.job_reasons(self.job)
             state, adf = self.status()
             return [], _ADF_STATES.get(adf) or ("empty" if source != "glass" else "driver"), " ".join(reasons + [adf]).strip()
@@ -4446,8 +4489,7 @@ class Main(QtWidgets.QMainWindow):
         self.update_status()
         if self.configured():
             QtCore.QTimer.singleShot(0, self.sync)
-        if not self.cfg.get("device"):
-            QtCore.QTimer.singleShot(0, self.find_scanner)
+        QtCore.QTimer.singleShot(0, self.find_scanner)     # the same scanner may be at another address today
 
     def configured(self):
         return bool(self.cfg.get("server"))
@@ -5152,20 +5194,27 @@ class Main(QtWidgets.QMainWindow):
     # ---- scanning ----------------------------------------------------------------------
 
     def find_scanner(self):
+        """At every start, in the background: the quick look (a moment for a scanner that answers
+        by itself; NAPS2 asked only when none does). The scanner that answers takes the place of
+        the one remembered — the same model in another place has another address, and the app
+        would otherwise learn it at the first scan, after a failure. None answers: what was
+        remembered stays. The « scan » button is not held: a scan meanwhile keeps its own account
+        of the ways, and writes it after this one."""
         if self.searching:
             return
         self.searching = True
         self.update_status()
+        naps2 = self.naps2
 
         def found(devices):
             self.searching = False
-            routes = pick_routes(devices, None)
-            if routes:
-                self.cfg["device"] = {"key": routes[0]["key"], "name": routes[0]["name"], "routes": routes}
+            device = found_again(self.cfg.get("device"), devices, naps2.asked_all)
+            if device:
+                self.cfg["device"] = device
                 save_config(self.cfg)
             self.update_status()
 
-        self.run(lambda say: self.naps2.devices(every=False), found, lambda m: found([]))
+        self.run(lambda say: naps2.devices(every=False), found, lambda m: found([]))
 
     def scan(self):
         if self.scanning:
@@ -5556,7 +5605,7 @@ class Main(QtWidgets.QMainWindow):
 
     def update_status(self):
         device = (self.cfg.get("device") or {}).get("name")
-        if self.searching:
+        if self.searching and not device:      # a scanner remembered keeps its name while it is looked for again
             scanner = _("looking for the scanner…")
         elif device:
             scanner = re.sub(r"\s+\([^()]*\)$", "", device)

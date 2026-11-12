@@ -11,6 +11,8 @@ from the same folder as tests/fake_naps2.py:
   $FAKE_SCANNER/asreal        the pictures as the real scanner sends them from its feeder: lightly
                               compressed, and announcing 3508 lines where they hold 3472
   $FAKE_SCANNER/slow          seconds per page
+  $FAKE_SCANNER/brother       as the Brother MFC-J6955DW: settings preceded by an XML declaration
+                              are ignored (the glass, 200 dpi, and the file says 200 dpi)
   $FAKE_SCANNER/direct.txt    every request, for the tests to read
 
     url, stop = fake_escl.serve(folder)        # in the test's own process
@@ -126,7 +128,7 @@ def serve(root, port=0):
                 from PIL import Image
                 im = Image.open(io.BytesIO(data))
                 out = io.BytesIO()
-                im.resize((im.width * job["dpi"] // 300, im.height * job["dpi"] // 300)).save(out, "JPEG", quality=85)
+                im.resize((im.width * job["dpi"] // 300, im.height * job["dpi"] // 300)).save(out, "JPEG", quality=85, **({"dpi": (job["dpi"], job["dpi"])} if job.get("says_dpi") else {}))
                 data = out.getvalue()
             if os.path.exists(here("asreal")):
                 from PIL import Image
@@ -147,7 +149,10 @@ def serve(root, port=0):
             source = (re.search(r"<pwg:InputSource>(\w+)<", body) or [None, "Platen"])[1]
             duplex = "<scan:Duplex>true<" in body
             dpi = int((re.search(r"<scan:XResolution>(\d+)<", body) or [None, "300"])[1])
-            self.note(f"POST {self.path} {source}{' duplex' if duplex else ''} {dpi}")
+            ignored = os.path.exists(here("brother")) and body.lstrip().startswith("<?xml")
+            if ignored:                # 201 all the same, and its own defaults instead of what was asked
+                source, duplex, dpi = "Platen", False, 200
+            self.note(f"POST {self.path} {source}{' duplex' if duplex else ''} {dpi}{' ignored' if ignored else ''}")
             if self.path != "/eSCL/ScanJobs":
                 return self.answer(404)
             busy = int(number("busy"))
@@ -157,7 +162,7 @@ def serve(root, port=0):
             if source == "Feeder" and (os.path.exists(here("nofeeder")) or not sheets()):
                 return self.answer(409)
             state["n"] += 1
-            jobs[state["n"]] = {"feeder": source == "Feeder", "dpi": dpi, "given": 0, "most": 10 ** 6}
+            jobs[state["n"]] = {"feeder": source == "Feeder", "dpi": dpi, "given": 0, "most": 10 ** 6, "says_dpi": ignored}
             # the address a real scanner gives is one only it knows
             self.answer(201, headers=(("Location", f"http://ScanjetPro4500.local./eSCL/ScanJobs/{state['n']}"),))
 

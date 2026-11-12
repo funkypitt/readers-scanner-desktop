@@ -195,8 +195,10 @@ class Escl:
         dpi = dpi if dpi in box["dpi"] or not box["dpi"] else min(box["dpi"], key=lambda d: (abs(d - dpi), -d))
         mode = "RGB24" if "RGB24" in box["modes"] or not box["modes"] else box["modes"][0]
         ext = float(caps["version"]) >= 2.1 if re.fullmatch(r"\d+(\.\d+)?", caps["version"]) else False
-        return ('<?xml version="1.0" encoding="UTF-8"?>\n'
-                f'<scan:ScanSettings xmlns:scan="{ESCL_NS["scan"]}" xmlns:pwg="{ESCL_NS["pwg"]}">'
+        # No XML declaration before the settings: with one, a Brother MFC-J6955DW answered 201 and
+        # ignored every setting (the glass at 200 dpi whatever was asked, 2026-11-12). sane-airscan,
+        # which that scanner obeys, sends none either.
+        return (f'<scan:ScanSettings xmlns:scan="{ESCL_NS["scan"]}" xmlns:pwg="{ESCL_NS["pwg"]}">'
                 f'<pwg:Version>{caps["version"]}</pwg:Version>'
                 '<pwg:ScanRegions><pwg:ScanRegion><pwg:ContentRegionUnits>escl:ThreeHundredthsOfInches</pwg:ContentRegionUnits>'
                 f'<pwg:XOffset>0</pwg:XOffset><pwg:YOffset>0</pwg:YOffset><pwg:Width>{width}</pwg:Width><pwg:Height>{height}</pwg:Height>'
@@ -207,7 +209,21 @@ class Escl:
                 + ('<scan:DocumentFormatExt>image/jpeg</scan:DocumentFormatExt>' if ext else '')
                 + f'<scan:XResolution>{dpi}</scan:XResolution><scan:YResolution>{dpi}</scan:YResolution>'
                 + (f'<scan:Duplex>{"true" if source == "duplex" else "false"}</scan:Duplex>' if source != "glass" else '')
-                + '</scan:ScanSettings>'), dpi
+                + '</scan:ScanSettings>'), dpi, box["dpi"]
+
+    @staticmethod
+    def _dpi_of(path, asked, offered):
+        """The resolution of a page received: the one asked for, unless the file itself names
+        another that the scanner offers. A scanner that ignored the settings sends its default
+        resolution; writing the one asked for over it would give the PDF a page of the wrong
+        size, and hide that the settings were ignored."""
+        try:
+            with Image.open(path) as im:
+                found = im.info.get("dpi")
+        except (OSError, ValueError):
+            return asked
+        found = int(round(found[0])) if found and found[0] and found[0] == found[1] else None
+        return found if found and found != asked and found in offered else asked
 
     def scan(self, source, pagesize, out_dir, on_page=None, dpi=None):
         """One scan from one source ("glass", "feeder", "duplex"). Returns (page files, error code
@@ -221,7 +237,8 @@ class Escl:
             state, adf = self.status()     # is it there at all? a cable pulled out is known in a moment
             if source != "glass" and adf in _ADF_STATES:
                 return [], _ADF_STATES[adf], adf
-            body, dpi = self._settings(source, pagesize, dpi)
+            body, dpi, offered = self._settings(source, pagesize, dpi)
+            words = ""
             for patience in range(8):
                 try:
                     r = self.http.post(self.url + "/eSCL/ScanJobs", data=body.encode("utf-8"), headers={"Content-Type": "text/xml"}, timeout=(3, 30))
@@ -250,9 +267,12 @@ class Escl:
                     out = os.path.join(out_dir, f"p{len(files) + 1:04d}.jpg")
                     with open(out, "wb") as f:
                         f.write(page.content)
-                    self._stamp(out, dpi)
+                    real = self._dpi_of(out, dpi, offered)
+                    if real != dpi:
+                        words = f"{real} dpi received where {dpi} were asked: the scanner ignored the settings"
+                    self._stamp(out, real)
                     jpeg_mend(out)
-                    jpeg_slim(out, dpi)
+                    jpeg_slim(out, real)
                     files.append(out)
                     quiet_tries = 0
                     on_page and on_page(len(files))
@@ -266,7 +286,7 @@ class Escl:
             if self._cancelled:
                 return [], "cancelled", ""
             if files:
-                return files, None, ""
+                return files, None, words
             reasons = self.job_reasons(self.job)
             state, adf = self.status()
             return [], _ADF_STATES.get(adf) or ("empty" if source != "glass" else "driver"), " ".join(reasons + [adf]).strip()

@@ -330,6 +330,12 @@ t0 = time.time()
 w.find_scanner()
 check("found by itself, in a moment, without NAPS2", wait(lambda: (w.cfg.get("device") or {}).get("routes", [{}])[0].get("backend") == "direct", 10) and time.time() - t0 < 3
       and w.scanner_line.text() == "HP ScanJet Pro 4500 fn1" and w.naps2.cmd is None, f"{w.scanner_line.text()} {time.time() - t0:.1f} s")
+# the same model in another place: remembered at an address that no longer answers
+w.cfg["device"] = {"key": w.cfg["device"]["key"], "name": "HP ScanJet Pro 4500 fn1", "routes": [dict(w.cfg["device"]["routes"][0], id="http://localhost:9", url="http://localhost:9", uuid="FAKE-ELSEWHERE")]}
+w.update_status()
+w.find_scanner()
+check("looked for again at the start: the name stays on the status line meanwhile", w.searching and w.scanner_line.text() == "HP ScanJet Pro 4500 fn1", w.scanner_line.text())
+check("the scanner that answers takes the place of the one remembered elsewhere", wait(lambda: not w.searching, 10) and w.cfg["device"]["routes"][0]["url"] == direct and len(w.cfg["device"]["routes"]) == 1, str(w.cfg["device"]))
 scanner(feeder=["facture-1.jpg", "facture-2.jpg"])
 w.cfg["source"] = "auto"; w.show_choices()
 click(w.scan_button)
@@ -342,6 +348,8 @@ click(w.scan_button)
 check("a paper jam: said as the scanner says it", wait(lambda: not w.scanning, 20) and w.message.title.text() == _("paper jam in the scanner"), w.message.title.text())
 stop_direct()
 os.environ["READERS_SCANNER_DIRECT"] = ""
+w.find_scanner(); wait(lambda: not w.searching, 10)
+check("nothing answers: what was remembered stays", (w.cfg.get("device") or {}).get("routes", [{}])[0].get("url") == direct, str(w.cfg.get("device")))
 os.environ["READERS_SCANNER_NAPS2"] = f"{PY} {HERE}/fake_naps2.py"
 w.naps2 = rs.Naps2(rs.DATA_DIR)
 w.cfg.pop("device", None)

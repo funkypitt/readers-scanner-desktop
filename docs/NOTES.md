@@ -263,3 +263,45 @@ only inside the app's data (`docs/<id>/doc.pdf`), and one from the phone only on
 - Found while testing: the description of what was written was compared with the dict it had
   been read into, changed in place meanwhile — never different, never saved, and every run
   wrote every file again under « (2) », « (3) »…
+
+## 1.2.1 (2026-11-12): the Brother obeys, and the scanner is looked for at every start
+
+Reported from a Brother MFC-J6955DW on the network, asked directly (eSCL), Ubuntu, the `.deb`:
+
+- **Every scan came from the glass, blank, 1680 × 2195 px, whatever the source and resolution
+  asked.** Established on the appliance by changing one thing at a time: with the XML
+  declaration (`<?xml version="1.0" encoding="UTF-8"?>`) before `<scan:ScanSettings>` it
+  answers 201 and applies its defaults (glass, 200 dpi); without it, the same body is obeyed
+  (the feeder, 2 sheets, 2464 × 3510 px at 300 dpi). The HP took both. sane-airscan, which
+  that scanner obeys, sends none. `Escl._settings` sends none any more; a test reads the body,
+  and the stand-in has a `brother` flag that ignores settings preceded by a declaration.
+- **A page's resolution.** `_stamp` wrote the resolution asked only when the file had none,
+  but `jpeg_slim` wrote it over whatever the file said: a 200 dpi page became a 300 dpi one,
+  the PDF's page a third too small, and nothing showed that the settings had been ignored. Now
+  the file's own resolution is kept when it names one the scanner offers and it is not the one
+  asked (`Escl._dpi_of`), and the trouble is written in NAPS2's log of words (« 200 dpi
+  received where 300 were asked: the scanner ignored the settings »). The width of the picture
+  is not used to infer a resolution: a feeder that cuts the picture to the sheet gives a
+  narrower one at the resolution asked, and an A5 sheet would be taken for a lower resolution.
+- **Not verified, noted for later**: on that model, `AdfState` went from `ScannerAdfLoaded` to
+  `ScannerAdfEmpty` during a scan made on the glass, the sheets probably still in the feeder.
+  If it holds, « automatic », which trusts `AdfState` before trying the feeder, can be wrong on
+  this scanner (it would take the glass with sheets in the feeder). The two scans that hit the
+  feeder did say `ScannerAdfLoaded`, so nothing is changed on that account.
+
+**The same scanner in two places.** The user has the same model at home and elsewhere; the
+app remembered the first address found and looked for the scanner only when nothing was
+remembered, so in the other place every first scan failed on the old address before the app
+looked again. Now `find_scanner` runs at every start, in the background (`naps2.devices(every=False)`:
+a moment for a scanner that answers by itself, NAPS2 asked only when none does), and
+`found_again` (parts/20_engine.py) decides: the scanner that answers takes the place of the one
+remembered; none answers, what was remembered stays; several answer, the remembered key wins
+(`pick_routes(devices, key)`, no longer `None`), and among two of the same model the remembered
+UUID. A scanner of the same model with another UUID is another scanner: its ways replace the
+old ones with no misses carried over, and the NAPS2 ways remembered for the other are left
+behind (they named its address). The same scanner found again keeps the misses of each way, by
+id, and its NAPS2 ways, which the quick look does not ask for — as `scan_pages` does after its
+own quick look. The « scan » button is not held while the look runs: a scan meanwhile starts
+from what is remembered, keeps its own account of the ways and writes it after the look's.
+The status line keeps the remembered name during the look; « looking for the scanner… » is
+for a first start only.
