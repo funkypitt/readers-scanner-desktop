@@ -160,10 +160,31 @@ def _multicast_refused():
         s.sendto(question, ("224.0.0.251", 5353))
         return False
     except OSError as e:
-        try:                           # with no network at all, multicast has no way out either
-            return e.errno in (errno.EHOSTUNREACH, errno.EPERM) and any(n.version == 4 for n in _my_networks())
-        except Exception:
+        # Multicast alone is not enough: GitHub's macOS machines refuse it too. The router of this
+        # network is asked for a connection (nothing is sent): refused « No route to host » as well,
+        # it is the Local Network refusal; answered, refused or silent, it is not.
+        return e.errno in (errno.EHOSTUNREACH, errno.EPERM) and _router_refused()
+    finally:
+        s.close()
+
+
+def _router_refused():
+    import ipaddress
+    import socket
+    try:
+        out = subprocess.run(["/sbin/route", "-n", "get", "default"], capture_output=True, text=True, timeout=3).stdout
+        router = re.search(r"gateway:\s*(\S+)", out).group(1)
+        if not ipaddress.ip_address(router).is_private:
             return False
+    except (OSError, subprocess.SubprocessError, AttributeError, ValueError):
+        return False
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.settimeout(1.0)
+    try:
+        s.connect((router, 80))
+        return False
+    except OSError as e:
+        return e.errno in (errno.EHOSTUNREACH, errno.EPERM)
     finally:
         s.close()
 

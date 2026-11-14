@@ -324,8 +324,9 @@ home, no LANG, the Finder's PATH):
   suggested NAPS2. On this network, an address where nothing answers gave a timeout (4 s and
   40 s), never EHOSTUNREACH. So on macOS, EHOSTUNREACH or EPERM for an address of a network this
   computer is on (`_on_this_network`, from ifaddr's addresses), or for discovery's own question
-  sent by hand to 224.0.0.251 (`_multicast_refused`, when zeroconf heard nothing), is taken for
-  the refusal: the error is `localnet`, and the reader is told where to allow the app. Not tried
+  sent by hand to 224.0.0.251 (`_multicast_refused`, when zeroconf heard nothing) *and* for a
+  connection to this network's router (`_router_refused`: GitHub's macOS machines refuse the
+  multicast alone, and the first try took that for the refusal), is taken for the refusal: the error is `localnet`, and the reader is told where to allow the app. Not tried
   with a real refusal (it needs the Mac's dialog): a refusal that fails another way is reported
   as before.
 - **« on the network or by USB »** was true on Linux only (ipp-usb listens on this computer):
