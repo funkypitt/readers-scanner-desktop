@@ -78,7 +78,10 @@ def when_label(millis):
         return _("today") + " " + d.strftime("%H:%M")
     if d.date() == today - timedelta(days=1):
         return _("yesterday") + " " + d.strftime("%H:%M")
-    return f"{d.day} {d.strftime('%b' if d.year == today.year else '%b %Y')}".lower() + " " + d.strftime("%H:%M")
+    # the month in the window's language, not the C library's: an app opened from the Finder has
+    # no LANG, and strftime said « nov » under a French window
+    month = QtCore.QLocale(_LANG if _LANG in _TR else "en").monthName(d.month, QtCore.QLocale.ShortFormat)
+    return (f"{d.day} {month}" + (f" {d.year}" if d.year != today.year else "")).lower() + " " + d.strftime("%H:%M")
 
 
 # ------------------------------------------------------------------------------------------

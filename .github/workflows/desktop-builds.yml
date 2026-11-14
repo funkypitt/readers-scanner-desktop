@@ -183,6 +183,8 @@ jobs:
             --add-data "bundle/tesseract:tesseract" \
             --collect-all pypdfium2 --collect-all pypdfium2_raw --collect-submodules zeroconf \
             readers_scanner.py
+          # the version, the oldest macOS it starts on (read from what it carries), the local network
+          python packaging/macos-info.py "dist/Readers Scanner.app" "$VERSION"
           # Ad hoc signature: on Apple Silicon an unsigned binary does not start at all.
           codesign --force --deep --sign - "dist/Readers Scanner.app"
           codesign --verify --deep --strict "dist/Readers Scanner.app"
@@ -219,6 +221,18 @@ jobs:
           PID=$!
           sleep 30
           kill "$PID" && echo "it started and was still running"
+
+      # As a new Mac opens it from the Finder: an empty home, no LANG, the Finder's PATH (no
+      # Homebrew, no Python), no stand-ins.
+      - name: Does the getting started work? (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          plutil -p "$RUNNER_TEMP/Readers Scanner.app/Contents/Info.plist" | grep -E "Version|LSMinimum|NSLocal|uscan"
+          H="$RUNNER_TEMP/fresh-home"; mkdir -p "$H"
+          env -i HOME="$H" USER="$USER" SHELL=/bin/zsh TMPDIR="$RUNNER_TEMP" PATH=/usr/bin:/bin:/usr/sbin:/sbin \
+            "$EXE" --self-test "$RUNNER_TEMP/fresh-report.txt" || failed=yes
+          cat "$RUNNER_TEMP/fresh-report.txt"
+          [ -z "$failed" ]
 
       # ---------------------------------------------------------------- with the real NAPS2
       - name: NAPS2 itself, on this system

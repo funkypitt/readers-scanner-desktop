@@ -52,6 +52,12 @@ def log():
 # --- names ---------------------------------------------------------------------------------
 d = {"created": 1790423589298, "name": "Facture: d'électricité / 2026"}
 check("file name safe, dated", rs.file_name_of(d) == rs.stamp_of(d["created"]) + " Facture d'électricité 2026.pdf", rs.file_name_of(d))
+from datetime import datetime as _dt
+march = int(_dt(2025, 3, 7, 9, 5).timestamp() * 1000)
+check("a date: the month in the window's language, whatever the C library's", rs.when_label(march) == "7 mar 2025 09:05", rs.when_label(march))
+rs._LANG = "fr"
+check("and in French", rs.when_label(march) == "7 mars 2025 09:05", rs.when_label(march))
+rs._LANG = "en"
 check("folder name", rs.folder_name_of("  Impôts / 2026. ") == "Impôts 2026" and rs.folder_name_of(" .. ") is None)
 check("reflow joins prose, keeps lists", rs.reflow("Nous vous remercions de votre confiance. Voici le\ndécompte de votre consommation pour la période du\n1er juillet au 31 août 2026.\n\nTotal : 412 kWh\nTVA : 7,97 CHF")
       == "Nous vous remercions de votre confiance. Voici le décompte de votre consommation pour la période du 1er juillet au 31 août 2026.\n\nTotal : 412 kWh\nTVA : 7,97 CHF")
@@ -151,6 +157,52 @@ check("cancel stops the scan", r["error"] == "cancelled", str(r))
 os.environ["READERS_SCANNER_NAPS2"] = "/nonexistent/naps2"
 missing = rs.Naps2(rs.DATA_DIR)
 check("NAPS2 absent and no scanner that answers by itself: said so", missing.version is None and rs.scan_pages(missing, cfg, "auto", out)["error"] == "nonaps2")
+
+# macOS 15+: an app refused the local network gets « No route to host » at once, for the
+# addresses of its own network; a scanner switched off makes it wait instead
+import errno, urllib3.util.connection
+real_connect, real_platform = urllib3.util.connection.create_connection, sys.platform
+
+
+def no_route(*a, **k):
+    raise OSError(errno.EHOSTUNREACH, "No route to host")
+
+
+urllib3.util.connection.create_connection = no_route
+try:
+    sys.platform = "darwin"
+    rs.LOCAL_NETWORK["refused"] = False
+    try:
+        rs.Escl("http://169.254.10.20:80", 1).caps()
+        code = None
+    except rs.EsclError as e:
+        code = e.code
+    check("macOS: no route to a scanner of this network is the Local Network refusal", code == "localnet" and rs.LOCAL_NETWORK["refused"], str(code))
+    check("and a scan then says where to allow the app", rs.scan_pages(missing, cfg, "auto", out)["error"] == "localnet")
+    rs.LOCAL_NETWORK["refused"] = False
+    try:
+        rs.Escl("http://203.0.113.5:80", 1).caps()
+    except rs.EsclError as e:
+        code = e.code
+    check("no route to an address of no network of this computer: not the refusal", code == "offline" and not rs.LOCAL_NETWORK["refused"], str(code))
+    sys.platform = "linux"
+    try:
+        rs.Escl("http://169.254.10.20:80", 1).caps()
+    except rs.EsclError as e:
+        code = e.code
+    check("elsewhere than macOS: offline, as before", code == "offline" and not rs.LOCAL_NETWORK["refused"], str(code))
+finally:
+    urllib3.util.connection.create_connection, sys.platform = real_connect, real_platform
+    rs.LOCAL_NETWORK["refused"] = False
+check("no route, and nothing refused: NAPS2 is suggested", rs.scan_pages(missing, cfg, "auto", out)["error"] == "nonaps2")
+sys.platform = "darwin"
+mac = rs.no_scanner_words()
+sys.platform = "win32"
+win = rs.no_scanner_words()
+sys.platform = "linux"
+lin = rs.no_scanner_words()
+sys.platform = real_platform
+check("USB asked directly only on Linux: macOS and Windows say NAPS2 for it", "plugged in by USB" in mac and mac == win and "or by USB" in lin and "plugged in" not in lin, mac)
 os.environ["READERS_SCANNER_NAPS2"] = f"{PY} {HERE}/fake_naps2.py"
 
 # --- the scanner asked directly (eSCL) -----------------------------------------------------

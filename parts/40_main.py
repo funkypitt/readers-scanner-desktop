@@ -617,10 +617,7 @@ class Main(QtWidgets.QMainWindow):
 
     def naps2_page(self):
         """No scanner answers by itself and NAPS2, which knows the others, is not there."""
-        self.say(_("no scanner found"),
-                 _("Most scanners made since 2015 (AirScan, Mopria) are found by themselves, on the network or by USB: is yours switched on? "
-                   "The others need NAPS2, a free program installed separately, from naps2.com. Pictures and PDFs can be brought in from files meanwhile."),
-                 (("again", _("look again")), ("naps2", _("get NAPS2")), ("import", _("from files…"))))
+        self.say(_("no scanner found"), no_scanner_words(), (("again", _("look again")), ("naps2", _("get NAPS2")), ("import", _("from files…"))))
 
     def message_action(self, key):
         if key == "scan":
@@ -1031,7 +1028,8 @@ class Main(QtWidgets.QMainWindow):
         hints = {"empty": _("Put the pages in the feeder, or choose « glass »."),
                  "nodevice": _("Switch the scanner on and check its cable; then scan again."),
                  "notfound": _("Switch the scanner on and check its cable; then scan again."),
-                 "offline": _("Switch the scanner on and check its cable; then scan again.")}
+                 "offline": _("Switch the scanner on and check its cable; then scan again."),
+                 "localnet": _("Allow it in System Settings › Privacy & Security › Local Network (« Readers Scanner »); then scan again.")}
         actions = [("scan", _("scan again"))]
         if has:
             actions.append(("review", _("back to the pages")))
@@ -1346,6 +1344,8 @@ class Main(QtWidgets.QMainWindow):
             scanner = _("looking for the scanner…")
         elif device:
             scanner = re.sub(r"\s+\([^()]*\)$", "", device)
+        elif LOCAL_NETWORK["refused"]:
+            scanner = error_text("localnet")
         else:
             scanner = _("no scanner found yet")
         if getattr(self, "trouble", ""):
@@ -1489,7 +1489,8 @@ def self_test(report):
                 check("scanners on the network can be looked for", False, str(e))
         t0 = time.time()
         direct = escl_find(2.0)
-        lines.append(f"      scanners that answer by themselves: {[(d['name'], d['link']) for d in direct] or 'none'} ({time.time() - t0:.1f} s)")
+        lines.append(f"      scanners that answer by themselves: {[(d['name'], d['link']) for d in direct] or 'none'} ({time.time() - t0:.1f} s)"
+                     + ("; macOS keeps the app from the local network" if LOCAL_NETWORK["refused"] else ""))
         naps2 = Naps2(tmp)
         lines.append(f"      NAPS2: {' '.join(naps2.cmd) + ' ' + str(naps2.version) if naps2.cmd else 'not installed on this computer'}")
         if naps2.cmd:

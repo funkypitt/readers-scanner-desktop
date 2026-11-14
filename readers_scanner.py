@@ -5,6 +5,7 @@ folder (kDrive, Nextcloud…). NAPS2 (naps2.com, installed separately) talks to 
 Tesseract reads the text. One file, PyQt5 + requests + Pillow + numpy. MIT licence."""
 
 import base64
+import errno
 import filecmp
 import json
 import locale
@@ -31,7 +32,7 @@ from PIL import Image
 from PyQt5 import QtCore, QtGui, QtWidgets
 
 APP = "readers-scanner"
-VERSION = "1.2.1"
+VERSION = "1.2.2"
 Image.MAX_IMAGE_PIXELS = 200_000_000      # an A3 page at 600 dpi is not an attack
 
 
@@ -362,6 +363,19 @@ _T = {
      "La mayoría de los escáneres fabricados desde 2015 (AirScan, Mopria) se encuentran solos, en la red o por USB: ¿está encendido el suyo? Los demás necesitan NAPS2, un programa libre que se instala aparte, desde naps2.com. Mientras tanto se pueden traer imágenes y PDF desde archivos.",
      "A maior parte dos digitalizadores fabricados desde 2015 (AirScan, Mopria) é encontrada por si, na rede ou por USB: o seu está ligado? Os outros precisam do NAPS2, um programa livre instalado à parte, a partir de naps2.com. Entretanto podem trazer-se imagens e PDF de ficheiros.",
      "Большинство сканеров, выпущенных с 2015 года (AirScan, Mopria), находятся сами, в сети или по USB: ваш включён? Остальным нужен NAPS2 — свободная программа, которая устанавливается отдельно, с naps2.com. Пока можно взять изображения и PDF из файлов."),
+ "Most scanners made since 2015 (AirScan, Mopria) are found by themselves on the network: is yours switched on, and on the same network as this computer? One plugged in by USB, and the others, need NAPS2, a free program installed separately, from naps2.com. Pictures and PDFs can be brought in from files meanwhile.":
+    ("La plupart des scanners fabriqués depuis 2015 (AirScan, Mopria) sont trouvés d'eux-mêmes sur le réseau : le vôtre est-il allumé, et sur le même réseau que cet ordinateur ? Celui qui est branché par USB, et les autres, ont besoin de NAPS2, un programme libre qui s'installe à part, depuis naps2.com. En attendant, des images et des PDF peuvent être repris depuis des fichiers.",
+     "Die meisten Scanner seit 2015 (AirScan, Mopria) werden im Netz von selbst gefunden: ist Ihrer eingeschaltet und im selben Netz wie dieser Computer? Ein über USB angeschlossener Scanner und die anderen brauchen NAPS2, ein freies Programm, das getrennt installiert wird, von naps2.com. Inzwischen lassen sich Bilder und PDFs aus Dateien übernehmen.",
+     "La mayoría de los escáneres fabricados desde 2015 (AirScan, Mopria) se encuentran solos en la red: ¿está encendido el suyo, y en la misma red que este ordenador? Uno conectado por USB, y los demás, necesitan NAPS2, un programa libre que se instala aparte, desde naps2.com. Mientras tanto se pueden traer imágenes y PDF desde archivos.",
+     "A maior parte dos digitalizadores fabricados desde 2015 (AirScan, Mopria) é encontrada por si na rede: o seu está ligado, e na mesma rede que este computador? Um ligado por USB, e os outros, precisam do NAPS2, um programa livre instalado à parte, a partir de naps2.com. Entretanto podem trazer-se imagens e PDF de ficheiros.",
+     "Большинство сканеров, выпущенных с 2015 года (AirScan, Mopria), находятся в сети сами: ваш включён и подключён к той же сети, что и этот компьютер? Сканеру, подключённому по USB, и остальным нужен NAPS2 — свободная программа, которая устанавливается отдельно, с naps2.com. Пока можно взять изображения и PDF из файлов."),
+ "the Mac does not let the app reach the local network": ("le Mac ne laisse pas l'app accéder au réseau local", "der Mac lässt die App nicht ins lokale Netzwerk", "el Mac no deja que la app acceda a la red local", "o Mac não deixa a app aceder à rede local", "Mac не даёт приложению доступ к локальной сети"),
+ "Allow it in System Settings › Privacy & Security › Local Network (« Readers Scanner »); then scan again.":
+    ("Autorisez-le dans Réglages Système › Confidentialité et sécurité › Réseau local (« Readers Scanner ») ; puis scannez à nouveau.",
+     "In Systemeinstellungen › Datenschutz & Sicherheit › Lokales Netzwerk erlauben (« Readers Scanner »); dann noch einmal scannen.",
+     "Permítalo en Ajustes del Sistema › Privacidad y seguridad › Red local (« Readers Scanner »); luego escanee de nuevo.",
+     "Permita-o em Definições do Sistema › Privacidade e segurança › Rede local (« Readers Scanner »); depois digitalize de novo.",
+     "Разрешите доступ: Системные настройки › Конфиденциальность и безопасность › Локальная сеть (« Readers Scanner »); затем сканируйте снова."),
  "NAPS2 %1 is here, for the scanners that do not answer by themselves": ("NAPS2 %1 est là, pour les scanners qui ne répondent pas d'eux-mêmes", "NAPS2 %1 ist da, für Scanner, die nicht von selbst antworten", "NAPS2 %1 está aquí, para los escáneres que no responden solos", "NAPS2 %1 está cá, para os digitalizadores que não respondem por si", "NAPS2 %1 установлен — для сканеров, которые не отвечают сами"),
  "NAPS2 is not installed: only the scanners that do not answer by themselves (AirScan) need it.": ("NAPS2 n'est pas installé : seuls les scanners qui ne répondent pas d'eux-mêmes (AirScan) en ont besoin.", "NAPS2 ist nicht installiert: nur Scanner, die nicht von selbst antworten (AirScan), brauchen es.", "NAPS2 no está instalado: solo lo necesitan los escáneres que no responden solos (AirScan).", "O NAPS2 não está instalado: só os digitalizadores que não respondem por si (AirScan) precisam dele.", "NAPS2 не установлен: он нужен только сканерам, которые не отвечают сами (AirScan)."),
  "two sheets went in together": ("deux feuilles sont passées ensemble", "zwei Blätter wurden zusammen eingezogen", "dos hojas entraron juntas", "duas folhas entraram juntas", "два листа прошли вместе"),
@@ -462,7 +476,10 @@ def when_label(millis):
         return _("today") + " " + d.strftime("%H:%M")
     if d.date() == today - timedelta(days=1):
         return _("yesterday") + " " + d.strftime("%H:%M")
-    return f"{d.day} {d.strftime('%b' if d.year == today.year else '%b %Y')}".lower() + " " + d.strftime("%H:%M")
+    # the month in the window's language, not the C library's: an app opened from the Finder has
+    # no LANG, and strftime said « nov » under a French window
+    month = QtCore.QLocale(_LANG if _LANG in _TR else "en").monthName(d.month, QtCore.QLocale.ShortFormat)
+    return (f"{d.day} {month}" + (f" {d.year}" if d.year != today.year else "")).lower() + " " + d.strftime("%H:%M")
 
 
 # ------------------------------------------------------------------------------------------
@@ -2524,8 +2541,19 @@ def error_text(code, detail=""):
         "warming": _("the scanner is warming up — try again in a moment"), "comm": _("the connection to the scanner was interrupted"),
         "nosane": _("SANE is not installed (the scanner drivers)"), "cancelled": _("scan cancelled"),
         "nodevice": _("no scanner found — is it switched on?"), "nonaps2": _("no scanner found"),
-        "multipick": _("two sheets went in together"),
+        "multipick": _("two sheets went in together"), "localnet": _("the Mac does not let the app reach the local network"),
     }.get(code) or (detail or _("the scan did not work"))
+
+
+def no_scanner_words():
+    """What is said when no scanner answers and NAPS2 is not there. A scanner on USB is asked
+    directly only on Linux (ipp-usb listens on this computer); on Windows and macOS it is
+    reached through NAPS2 and the system's drivers."""
+    if sys.platform.startswith("linux"):
+        return _("Most scanners made since 2015 (AirScan, Mopria) are found by themselves, on the network or by USB: is yours switched on? "
+                 "The others need NAPS2, a free program installed separately, from naps2.com. Pictures and PDFs can be brought in from files meanwhile.")
+    return _("Most scanners made since 2015 (AirScan, Mopria) are found by themselves on the network: is yours switched on, and on the same network as this computer? "
+             "One plugged in by USB, and the others, need NAPS2, a free program installed separately, from naps2.com. Pictures and PDFs can be brought in from files meanwhile.")
 
 
 def _model_key(name):
@@ -2830,6 +2858,8 @@ def scan_pages(naps2, cfg, source, out_dir, on_page=None, on_state=None):
         routes = pick_routes(found, None)
         searched = 2 if naps2.asked_all or not naps2.cmd else 1
         if not routes:
+            if LOCAL_NETWORK["refused"]:   # macOS keeps the network's scanners from the app: say that, not « switched on? »
+                return {"files": [], "error": "localnet", "detail": ""}
             return {"files": [], "error": "nodevice" if naps2.cmd else "nonaps2", "detail": ""}
     key = routes[0]["key"]
     pagesize = page_size_of(cfg)
@@ -2866,13 +2896,13 @@ def scan_pages(naps2, cfg, source, out_dir, on_page=None, on_state=None):
                 return {"files": [f for f in files if f not in blank], "blank": blank, "source": src, "error": None,
                         "device": {"key": key, "name": route["name"], "routes": routes}}
             last = (err, said)
-            if err in ("notfound", "offline", "comm", "driver", "unknown") and route not in missed:
+            if err in ("notfound", "offline", "comm", "driver", "unknown", "localnet") and route not in missed:
                 missed.append(route)
             if err == "cancelled":
                 return {"files": [], "error": err, "detail": ""}
             if err in ("empty", "nofeeder", "noduplex", "unknown") and src != "glass":
                 break                          # nothing in the feeder: the glass, when automatic
-            if err in ("notfound", "offline", "comm", "driver", "unknown"):
+            if err in ("notfound", "offline", "comm", "driver", "unknown", "localnet"):
                 while not tries and searched < 2:
                     # looked for again, once: first those that answer by themselves (a moment), then every way
                     on_state and on_state("searching")
@@ -2888,8 +2918,10 @@ def scan_pages(naps2, cfg, source, out_dir, on_page=None, on_state=None):
                 continue
             return {"files": [], "error": err, "detail": said, "source": src}
         else:
-            if source == "auto" and src == "feeder" and last[0] in ("notfound", "offline", "comm", "driver"):
+            if source == "auto" and src == "feeder" and last[0] in ("notfound", "offline", "comm", "driver", "localnet"):
                 break                          # nobody answers: the glass would not either
+    if LOCAL_NETWORK["refused"] and last[0] in ("notfound", "offline", "comm", "unknown"):
+        last = ("localnet", last[1])           # not switched off: kept from the app by macOS
     return {"files": [], "error": last[0], "detail": last[1]}
 
 
@@ -3009,6 +3041,89 @@ def jpeg_slim(path, dpi):
     return 0
 
 
+# ------------------------------------------------------------------------------------------
+# macOS 15 and later ask the user before an app reaches the devices of the local network
+# (System Settings › Privacy & Security › Local Network). An app refused is not told so: its
+# connections to the network's devices fail at once with « No route to host » (EHOSTUNREACH)
+# and its multicast does not go out, so nothing is found. A scanner switched off does not fail
+# that way: an address of this network where nothing answers makes the connection wait (tried
+# on a Mac on 2026-11-14: a timeout, after 4 s and after 40 s). So, on macOS, EHOSTUNREACH or
+# EPERM for an address of a network this computer is on is taken for the refusal, and the
+# reader is told where to allow the app instead of « is it switched on? ».
+# ------------------------------------------------------------------------------------------
+
+LOCAL_NETWORK = {"refused": False}
+
+
+def _os_errors(e):
+    """The OSErrors behind an exception, requests' and urllib3's wrappings undone."""
+    seen = []
+    while isinstance(e, BaseException) and all(e is not x for x in seen) and len(seen) < 12:
+        seen.append(e)
+        e = e.__cause__ or e.__context__ or getattr(e, "reason", None) or (e.args[0] if e.args and isinstance(e.args[0], BaseException) else None)
+    return [x for x in seen if isinstance(x, OSError) and x.errno]
+
+
+def _my_networks():
+    """The networks this computer is on (its own addresses and their prefixes), loopback left out."""
+    import ipaddress
+    import ifaddr
+    nets = []
+    for adapter in ifaddr.get_adapters():
+        for a in adapter.ips:
+            address = a.ip if isinstance(a.ip, str) else a.ip[0]
+            try:
+                net = ipaddress.ip_network(f"{address.split('%')[0]}/{a.network_prefix}", strict=False)
+            except ValueError:
+                continue
+            if not net.is_loopback:
+                nets.append(net)
+    return nets
+
+
+def _on_this_network(host):
+    import ipaddress
+    try:
+        ip = ipaddress.ip_address((host or "").strip("[]").split("%")[0])
+        return ip.is_link_local or any(ip in net for net in _my_networks() if net.version == ip.version)
+    except Exception:
+        return False
+
+
+def mac_refused(error, host):
+    """Whether this failure to reach `host` is macOS keeping the app from the local network;
+    noted in LOCAL_NETWORK when it is."""
+    if sys.platform != "darwin":
+        return False
+    if any(x.errno in (errno.EHOSTUNREACH, errno.EPERM) for x in _os_errors(error)) and _on_this_network(host):
+        LOCAL_NETWORK["refused"] = True
+        return True
+    return False
+
+
+def _multicast_refused():
+    """Discovery's question (who offers _uscan._tcp?) sent once more by hand, to learn whether
+    macOS lets it out: zeroconf keeps such failures to itself."""
+    import socket
+    question = (b"\x00\x00\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00"
+                + b"".join(bytes([len(p)]) + p for p in (b"_uscan", b"_tcp", b"local")) + b"\x00\x00\x0c\x00\x01")
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    except OSError:
+        return False
+    try:
+        s.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 255)
+        s.sendto(question, ("224.0.0.251", 5353))
+        return False
+    except OSError as e:
+        try:                           # with no network at all, multicast has no way out either
+            return e.errno in (errno.EHOSTUNREACH, errno.EPERM) and any(n.version == 4 for n in _my_networks())
+        except Exception:
+            return False
+    finally:
+        s.close()
+
+
 class EsclError(Exception):
     def __init__(self, code, words=""):
         super().__init__(words or code)
@@ -3039,7 +3154,7 @@ class Escl:
         try:
             r = self.http.get(self.url + path, timeout=(min(3, timeout or self.timeout), timeout or self.timeout))
         except requests.RequestException as e:
-            raise EsclError("offline", str(e))
+            raise EsclError("localnet" if mac_refused(e, urlparse(self.url).hostname) else "offline", str(e))
         if r.status_code == 503:
             raise EsclError("busy", "503")
         if r.status_code != 200:
@@ -3167,7 +3282,7 @@ class Escl:
                 try:
                     r = self.http.post(self.url + "/eSCL/ScanJobs", data=body.encode("utf-8"), headers={"Content-Type": "text/xml"}, timeout=(3, 30))
                 except requests.RequestException as e:
-                    return [], "offline", str(e)
+                    return [], "localnet" if mac_refused(e, urlparse(self.url).hostname) else "offline", str(e)
                 if r.status_code != 503 or self._cancelled:
                     break
                 time.sleep(2)              # busy with the scan before
@@ -3254,6 +3369,7 @@ def escl_probe(url, timeout=1.5):
         caps = e.caps()
     except EsclError:
         return None
+    LOCAL_NETWORK["refused"] = False
     # ipp-usb, which carries eSCL over the cable, listens on this computer under the name localhost
     return {"id": url, "url": url, "name": caps["name"], "backend": "direct", "key": _model_key(caps["name"]), "uuid": caps["uuid"],
             "link": "usb" if urlparse(url).hostname == "localhost" else "net",
@@ -3265,6 +3381,7 @@ def escl_find(seconds=3.0):
     this computer, ports 60000 and up), and on the network (they announce themselves). A scanner
     plugged in and on the network is found twice: two ways to one scanner, the cable first."""
     found, seen = [], set()
+    LOCAL_NETWORK["refused"] = False
 
     def add(url):
         way = escl_probe(url)
@@ -3300,6 +3417,8 @@ def escl_find(seconds=3.0):
     try:
         zc = Zeroconf()
     except OSError:
+        if sys.platform == "darwin" and _multicast_refused():
+            LOCAL_NETWORK["refused"] = True
         return found
     try:
         heard = Heard()
@@ -3311,6 +3430,8 @@ def escl_find(seconds=3.0):
     for scheme, host, port, root in sorted(set(urls)):      # http before https
         if root.lower() == "escl" and not host.startswith("127."):
             add(f"{scheme}://{host}:{port}")
+    if not urls and sys.platform == "darwin" and _multicast_refused():
+        LOCAL_NETWORK["refused"] = True
     return found
 
 
@@ -4880,10 +5001,7 @@ class Main(QtWidgets.QMainWindow):
 
     def naps2_page(self):
         """No scanner answers by itself and NAPS2, which knows the others, is not there."""
-        self.say(_("no scanner found"),
-                 _("Most scanners made since 2015 (AirScan, Mopria) are found by themselves, on the network or by USB: is yours switched on? "
-                   "The others need NAPS2, a free program installed separately, from naps2.com. Pictures and PDFs can be brought in from files meanwhile."),
-                 (("again", _("look again")), ("naps2", _("get NAPS2")), ("import", _("from files…"))))
+        self.say(_("no scanner found"), no_scanner_words(), (("again", _("look again")), ("naps2", _("get NAPS2")), ("import", _("from files…"))))
 
     def message_action(self, key):
         if key == "scan":
@@ -5294,7 +5412,8 @@ class Main(QtWidgets.QMainWindow):
         hints = {"empty": _("Put the pages in the feeder, or choose « glass »."),
                  "nodevice": _("Switch the scanner on and check its cable; then scan again."),
                  "notfound": _("Switch the scanner on and check its cable; then scan again."),
-                 "offline": _("Switch the scanner on and check its cable; then scan again.")}
+                 "offline": _("Switch the scanner on and check its cable; then scan again."),
+                 "localnet": _("Allow it in System Settings › Privacy & Security › Local Network (« Readers Scanner »); then scan again.")}
         actions = [("scan", _("scan again"))]
         if has:
             actions.append(("review", _("back to the pages")))
@@ -5609,6 +5728,8 @@ class Main(QtWidgets.QMainWindow):
             scanner = _("looking for the scanner…")
         elif device:
             scanner = re.sub(r"\s+\([^()]*\)$", "", device)
+        elif LOCAL_NETWORK["refused"]:
+            scanner = error_text("localnet")
         else:
             scanner = _("no scanner found yet")
         if getattr(self, "trouble", ""):
@@ -5752,7 +5873,8 @@ def self_test(report):
                 check("scanners on the network can be looked for", False, str(e))
         t0 = time.time()
         direct = escl_find(2.0)
-        lines.append(f"      scanners that answer by themselves: {[(d['name'], d['link']) for d in direct] or 'none'} ({time.time() - t0:.1f} s)")
+        lines.append(f"      scanners that answer by themselves: {[(d['name'], d['link']) for d in direct] or 'none'} ({time.time() - t0:.1f} s)"
+                     + ("; macOS keeps the app from the local network" if LOCAL_NETWORK["refused"] else ""))
         naps2 = Naps2(tmp)
         lines.append(f"      NAPS2: {' '.join(naps2.cmd) + ' ' + str(naps2.version) if naps2.cmd else 'not installed on this computer'}")
         if naps2.cmd:

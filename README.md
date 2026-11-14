@@ -1,7 +1,7 @@
 # Reader's Scanner (desktop)
 
 > **Most scanners need nothing else.** Those made since about 2015 (AirScan, Mopria, eSCL) are
-> asked directly, on the network or by USB. **The others need [NAPS2](https://www.naps2.com/download)**
+> asked directly, on the network (and by USB on Linux). **Those plugged in by USB on Windows or a Mac, and the others, need [NAPS2](https://www.naps2.com/download)**
 > (free, open source), which is not installed with the app: on Linux it reaches them through
 > SANE, on Windows through WIA or TWAIN, on macOS through Apple's drivers.
 >
@@ -45,6 +45,10 @@ no account with the app, nothing leaves your computer except to your own WebDAV 
   colour theme (black on white, white on black, then the Plume keyboard's palettes: lavender, sage,
   nordic, terracotta, coquette, activist, sultry, nature); Ctrl+= and Ctrl+- change the size;
   Ctrl+, opens the settings.
+- **On a Mac** (1.2.2): macOS 14 or later, said by the Finder on an older one instead of an app that
+  vanishes; the Mac asks once whether the app may look for devices on the local network — say yes,
+  or the scanner is not found (the app says where to allow it afterwards: *System Settings* ›
+  *Privacy & Security* › *Local Network*). Dates in the window's language, opened from the Finder too.
 - English, French, German, Spanish, Portuguese and Russian, following the system language.
 
 More detail: [docs/NOTES.md](docs/NOTES.md).
@@ -59,7 +63,7 @@ most distributions).
 - Debian, Ubuntu, Pop!_OS: add the [apt repository](https://funkypitt.github.io/apt-repo/), then `sudo apt install readers-scanner`. Or take the `.deb` from the [latest release](https://github.com/funkypitt/readers-scanner-desktop/releases/latest): `sudo apt install ./readers-scanner_*_all.deb`. Tesseract and poppler come with it.
 - Arch, Manjaro: `git clone https://github.com/funkypitt/readers-scanner-desktop && cd readers-scanner-desktop/packaging && makepkg -si`.
 - Windows: `readers-scanner_…_windows_x64_setup.exe` from the latest release. It installs for you alone, without administrator rights.
-- macOS: the `.dmg` from the latest release, `apple-silicon` or `intel`; drag the app to Applications.
+- macOS 14 or later: the `.dmg` from the latest release, `apple-silicon` or `intel`; drag the app to Applications.
 - Anywhere else: `python3 readers_scanner.py` with PyQt5, requests, Pillow, numpy and zeroconf installed, and `tesseract` and `pdftoppm` (poppler) on the path — or `pip install pypdfium2` in place of poppler.
 
 The Windows and macOS builds carry their own Tesseract. They

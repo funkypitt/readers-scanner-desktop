@@ -620,8 +620,19 @@ def error_text(code, detail=""):
         "warming": _("the scanner is warming up — try again in a moment"), "comm": _("the connection to the scanner was interrupted"),
         "nosane": _("SANE is not installed (the scanner drivers)"), "cancelled": _("scan cancelled"),
         "nodevice": _("no scanner found — is it switched on?"), "nonaps2": _("no scanner found"),
-        "multipick": _("two sheets went in together"),
+        "multipick": _("two sheets went in together"), "localnet": _("the Mac does not let the app reach the local network"),
     }.get(code) or (detail or _("the scan did not work"))
+
+
+def no_scanner_words():
+    """What is said when no scanner answers and NAPS2 is not there. A scanner on USB is asked
+    directly only on Linux (ipp-usb listens on this computer); on Windows and macOS it is
+    reached through NAPS2 and the system's drivers."""
+    if sys.platform.startswith("linux"):
+        return _("Most scanners made since 2015 (AirScan, Mopria) are found by themselves, on the network or by USB: is yours switched on? "
+                 "The others need NAPS2, a free program installed separately, from naps2.com. Pictures and PDFs can be brought in from files meanwhile.")
+    return _("Most scanners made since 2015 (AirScan, Mopria) are found by themselves on the network: is yours switched on, and on the same network as this computer? "
+             "One plugged in by USB, and the others, need NAPS2, a free program installed separately, from naps2.com. Pictures and PDFs can be brought in from files meanwhile.")
 
 
 def _model_key(name):
@@ -926,6 +937,8 @@ def scan_pages(naps2, cfg, source, out_dir, on_page=None, on_state=None):
         routes = pick_routes(found, None)
         searched = 2 if naps2.asked_all or not naps2.cmd else 1
         if not routes:
+            if LOCAL_NETWORK["refused"]:   # macOS keeps the network's scanners from the app: say that, not « switched on? »
+                return {"files": [], "error": "localnet", "detail": ""}
             return {"files": [], "error": "nodevice" if naps2.cmd else "nonaps2", "detail": ""}
     key = routes[0]["key"]
     pagesize = page_size_of(cfg)
@@ -962,13 +975,13 @@ def scan_pages(naps2, cfg, source, out_dir, on_page=None, on_state=None):
                 return {"files": [f for f in files if f not in blank], "blank": blank, "source": src, "error": None,
                         "device": {"key": key, "name": route["name"], "routes": routes}}
             last = (err, said)
-            if err in ("notfound", "offline", "comm", "driver", "unknown") and route not in missed:
+            if err in ("notfound", "offline", "comm", "driver", "unknown", "localnet") and route not in missed:
                 missed.append(route)
             if err == "cancelled":
                 return {"files": [], "error": err, "detail": ""}
             if err in ("empty", "nofeeder", "noduplex", "unknown") and src != "glass":
                 break                          # nothing in the feeder: the glass, when automatic
-            if err in ("notfound", "offline", "comm", "driver", "unknown"):
+            if err in ("notfound", "offline", "comm", "driver", "unknown", "localnet"):
                 while not tries and searched < 2:
                     # looked for again, once: first those that answer by themselves (a moment), then every way
                     on_state and on_state("searching")
@@ -984,8 +997,10 @@ def scan_pages(naps2, cfg, source, out_dir, on_page=None, on_state=None):
                 continue
             return {"files": [], "error": err, "detail": said, "source": src}
         else:
-            if source == "auto" and src == "feeder" and last[0] in ("notfound", "offline", "comm", "driver"):
+            if source == "auto" and src == "feeder" and last[0] in ("notfound", "offline", "comm", "driver", "localnet"):
                 break                          # nobody answers: the glass would not either
+    if LOCAL_NETWORK["refused"] and last[0] in ("notfound", "offline", "comm", "unknown"):
+        last = ("localnet", last[1])           # not switched off: kept from the app by macOS
     return {"files": [], "error": last[0], "detail": last[1]}
 
 

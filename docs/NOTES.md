@@ -305,3 +305,34 @@ own quick look. The « scan » button is not held while the look runs: a scan me
 from what is remembered, keeps its own account of the ways and writes it after the look's.
 The status line keeps the remembered name during the look; « looking for the scanner… » is
 for a first start only.
+
+## 1.2.2 (2026-11-14): the Mac build says what it needs
+
+Found by trying the 1.2.1 `.dmg` as a new Mac would have it (opened from the Finder: an empty
+home, no LANG, the Finder's PATH):
+
+- **Info.plist said 0.0.0 and no oldest macOS**, while numpy's libraries ask for macOS 14 (and
+  pdfium for 13): on macOS 11–13 the app died at its first import without a word.
+  `packaging/macos-info.py`, run after PyInstaller and before the signature, writes the version
+  and `LSMinimumSystemVersion` — the highest `minos` of every Mach-O file in the app, read with
+  `otool`, so the Intel build says its own — and the Local Network words
+  (`NSLocalNetworkUsageDescription`, `NSBonjourServices`: `_uscan._tcp`, `_uscans._tcp`, what
+  `escl_find` browses). The app opens no file from the Finder: no document types.
+- **macOS 15 and later ask before an app reaches the local network.** Refused, the app is not
+  told: connections to the network's devices fail at once with « No route to host »
+  (EHOSTUNREACH), multicast does not go out, and the app said « is it switched on? » and
+  suggested NAPS2. On this network, an address where nothing answers gave a timeout (4 s and
+  40 s), never EHOSTUNREACH. So on macOS, EHOSTUNREACH or EPERM for an address of a network this
+  computer is on (`_on_this_network`, from ifaddr's addresses), or for discovery's own question
+  sent by hand to 224.0.0.251 (`_multicast_refused`, when zeroconf heard nothing), is taken for
+  the refusal: the error is `localnet`, and the reader is told where to allow the app. Not tried
+  with a real refusal (it needs the Mac's dialog): a refusal that fails another way is reported
+  as before.
+- **« on the network or by USB »** was true on Linux only (ipp-usb listens on this computer):
+  on Windows and macOS a scanner on USB goes through NAPS2 and the system's drivers, and the
+  message says so (`no_scanner_words`).
+- **Dates**: `when_label` took the month from strftime, which follows LC_TIME; from the Finder
+  there is none, and a French window said « 7 mar ». The month now comes from Qt in the
+  window's language.
+- CI runs the built app's `--self-test` once more as the Finder would start it
+  (`env -i`, an empty home, `PATH=/usr/bin:/bin:/usr/sbin:/sbin`).

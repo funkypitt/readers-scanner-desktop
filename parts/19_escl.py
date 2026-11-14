@@ -85,6 +85,89 @@ def jpeg_slim(path, dpi):
     return 0
 
 
+# ------------------------------------------------------------------------------------------
+# macOS 15 and later ask the user before an app reaches the devices of the local network
+# (System Settings › Privacy & Security › Local Network). An app refused is not told so: its
+# connections to the network's devices fail at once with « No route to host » (EHOSTUNREACH)
+# and its multicast does not go out, so nothing is found. A scanner switched off does not fail
+# that way: an address of this network where nothing answers makes the connection wait (tried
+# on a Mac on 2026-11-14: a timeout, after 4 s and after 40 s). So, on macOS, EHOSTUNREACH or
+# EPERM for an address of a network this computer is on is taken for the refusal, and the
+# reader is told where to allow the app instead of « is it switched on? ».
+# ------------------------------------------------------------------------------------------
+
+LOCAL_NETWORK = {"refused": False}
+
+
+def _os_errors(e):
+    """The OSErrors behind an exception, requests' and urllib3's wrappings undone."""
+    seen = []
+    while isinstance(e, BaseException) and all(e is not x for x in seen) and len(seen) < 12:
+        seen.append(e)
+        e = e.__cause__ or e.__context__ or getattr(e, "reason", None) or (e.args[0] if e.args and isinstance(e.args[0], BaseException) else None)
+    return [x for x in seen if isinstance(x, OSError) and x.errno]
+
+
+def _my_networks():
+    """The networks this computer is on (its own addresses and their prefixes), loopback left out."""
+    import ipaddress
+    import ifaddr
+    nets = []
+    for adapter in ifaddr.get_adapters():
+        for a in adapter.ips:
+            address = a.ip if isinstance(a.ip, str) else a.ip[0]
+            try:
+                net = ipaddress.ip_network(f"{address.split('%')[0]}/{a.network_prefix}", strict=False)
+            except ValueError:
+                continue
+            if not net.is_loopback:
+                nets.append(net)
+    return nets
+
+
+def _on_this_network(host):
+    import ipaddress
+    try:
+        ip = ipaddress.ip_address((host or "").strip("[]").split("%")[0])
+        return ip.is_link_local or any(ip in net for net in _my_networks() if net.version == ip.version)
+    except Exception:
+        return False
+
+
+def mac_refused(error, host):
+    """Whether this failure to reach `host` is macOS keeping the app from the local network;
+    noted in LOCAL_NETWORK when it is."""
+    if sys.platform != "darwin":
+        return False
+    if any(x.errno in (errno.EHOSTUNREACH, errno.EPERM) for x in _os_errors(error)) and _on_this_network(host):
+        LOCAL_NETWORK["refused"] = True
+        return True
+    return False
+
+
+def _multicast_refused():
+    """Discovery's question (who offers _uscan._tcp?) sent once more by hand, to learn whether
+    macOS lets it out: zeroconf keeps such failures to itself."""
+    import socket
+    question = (b"\x00\x00\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00"
+                + b"".join(bytes([len(p)]) + p for p in (b"_uscan", b"_tcp", b"local")) + b"\x00\x00\x0c\x00\x01")
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    except OSError:
+        return False
+    try:
+        s.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 255)
+        s.sendto(question, ("224.0.0.251", 5353))
+        return False
+    except OSError as e:
+        try:                           # with no network at all, multicast has no way out either
+            return e.errno in (errno.EHOSTUNREACH, errno.EPERM) and any(n.version == 4 for n in _my_networks())
+        except Exception:
+            return False
+    finally:
+        s.close()
+
+
 class EsclError(Exception):
     def __init__(self, code, words=""):
         super().__init__(words or code)
@@ -115,7 +198,7 @@ class Escl:
         try:
             r = self.http.get(self.url + path, timeout=(min(3, timeout or self.timeout), timeout or self.timeout))
         except requests.RequestException as e:
-            raise EsclError("offline", str(e))
+            raise EsclError("localnet" if mac_refused(e, urlparse(self.url).hostname) else "offline", str(e))
         if r.status_code == 503:
             raise EsclError("busy", "503")
         if r.status_code != 200:
@@ -243,7 +326,7 @@ class Escl:
                 try:
                     r = self.http.post(self.url + "/eSCL/ScanJobs", data=body.encode("utf-8"), headers={"Content-Type": "text/xml"}, timeout=(3, 30))
                 except requests.RequestException as e:
-                    return [], "offline", str(e)
+                    return [], "localnet" if mac_refused(e, urlparse(self.url).hostname) else "offline", str(e)
                 if r.status_code != 503 or self._cancelled:
                     break
                 time.sleep(2)              # busy with the scan before
@@ -330,6 +413,7 @@ def escl_probe(url, timeout=1.5):
         caps = e.caps()
     except EsclError:
         return None
+    LOCAL_NETWORK["refused"] = False
     # ipp-usb, which carries eSCL over the cable, listens on this computer under the name localhost
     return {"id": url, "url": url, "name": caps["name"], "backend": "direct", "key": _model_key(caps["name"]), "uuid": caps["uuid"],
             "link": "usb" if urlparse(url).hostname == "localhost" else "net",
@@ -341,6 +425,7 @@ def escl_find(seconds=3.0):
     this computer, ports 60000 and up), and on the network (they announce themselves). A scanner
     plugged in and on the network is found twice: two ways to one scanner, the cable first."""
     found, seen = [], set()
+    LOCAL_NETWORK["refused"] = False
 
     def add(url):
         way = escl_probe(url)
@@ -376,6 +461,8 @@ def escl_find(seconds=3.0):
     try:
         zc = Zeroconf()
     except OSError:
+        if sys.platform == "darwin" and _multicast_refused():
+            LOCAL_NETWORK["refused"] = True
         return found
     try:
         heard = Heard()
@@ -387,4 +474,6 @@ def escl_find(seconds=3.0):
     for scheme, host, port, root in sorted(set(urls)):      # http before https
         if root.lower() == "escl" and not host.startswith("127."):
             add(f"{scheme}://{host}:{port}")
+    if not urls and sys.platform == "darwin" and _multicast_refused():
+        LOCAL_NETWORK["refused"] = True
     return found
