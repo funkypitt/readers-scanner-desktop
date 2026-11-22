@@ -1025,9 +1025,12 @@ def found_again(device, devices, asked_all=False):
     if not routes:
         return None
     uuids = {r["uuid"] for r in before if r.get("uuid")}
-    if len({r["uuid"] for r in routes if r.get("uuid")}) > 1 and any(r.get("uuid") in uuids for r in routes):
+    known = set(uuids)
+    if len({r["uuid"] for r in routes if r.get("uuid")}) > 1:      # two of that model: one scanner, never a mix of both
+        if not any(r.get("uuid") in uuids for r in routes):
+            uuids = {next(r["uuid"] for r in routes if r.get("uuid"))}
         routes = [r for r in routes if not r.get("uuid") or r["uuid"] in uuids]
-    same = not uuids or any(r.get("uuid") in uuids for r in routes)
+    same = not known or any(r.get("uuid") in known for r in routes)
     for r in routes:
         r["misses"] = next((x.get("misses", 0) for x in before if same and r.get("id") and x.get("id") == r["id"]), 0)
     kept = [x for x in before if not x.get("url") and x.get("key") == routes[0]["key"]] if same and not asked_all else []

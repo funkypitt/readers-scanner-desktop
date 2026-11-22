@@ -32,7 +32,7 @@ from PIL import Image
 from PyQt5 import QtCore, QtGui, QtWidgets
 
 APP = "readers-scanner"
-VERSION = "1.2.2"
+VERSION = "1.3.0"
 Image.MAX_IMAGE_PIXELS = 200_000_000      # an A3 page at 600 dpi is not an attack
 
 
@@ -2946,9 +2946,12 @@ def found_again(device, devices, asked_all=False):
     if not routes:
         return None
     uuids = {r["uuid"] for r in before if r.get("uuid")}
-    if len({r["uuid"] for r in routes if r.get("uuid")}) > 1 and any(r.get("uuid") in uuids for r in routes):
+    known = set(uuids)
+    if len({r["uuid"] for r in routes if r.get("uuid")}) > 1:      # two of that model: one scanner, never a mix of both
+        if not any(r.get("uuid") in uuids for r in routes):
+            uuids = {next(r["uuid"] for r in routes if r.get("uuid"))}
         routes = [r for r in routes if not r.get("uuid") or r["uuid"] in uuids]
-    same = not uuids or any(r.get("uuid") in uuids for r in routes)
+    same = not known or any(r.get("uuid") in known for r in routes)
     for r in routes:
         r["misses"] = next((x.get("misses", 0) for x in before if same and r.get("id") and x.get("id") == r["id"]), 0)
     kept = [x for x in before if not x.get("url") and x.get("key") == routes[0]["key"]] if same and not asked_all else []
@@ -4275,7 +4278,7 @@ class SettingsDialog(QtWidgets.QDialog):
         self.again.clicked.connect(self.look_again)
         row = QtWidgets.QHBoxLayout(); row.addWidget(self.scanner, 1); row.addWidget(self.again)
         form.addRow(_("scanner"), row)
-        self.devices = None
+        self.devices = main.found if main.found_all or not main.naps2.cmd else None     # what the window saw, when it saw everything
         self.fill_scanners()
         naps = main.naps2
         self.naps = QtWidgets.QLabel(_("NAPS2 %1 is here, for the scanners that do not answer by themselves", naps.version) if naps.cmd else
@@ -4346,7 +4349,8 @@ class SettingsDialog(QtWidgets.QDialog):
         self.main.run(lambda note: self.main.naps2.devices(), self.found, lambda m: self.found([]))
 
     def found(self, devices):
-        self.devices = devices
+        self.devices = self.main.found = devices
+        self.main.found_all = self.main.naps2.asked_all
         self.again.setEnabled(True)
         self.again.setText(_("look again"))
         self.fill_scanners()
@@ -4451,6 +4455,8 @@ class Main(QtWidgets.QMainWindow):
         self.session_dir = os.path.join(DATA_DIR, "session")
         self.scanning = False
         self.searching = False
+        self.found = None             # every way to every scanner seen at the last look; None: not looked yet
+        self.found_all = False        # were NAPS2's ways looked for too, in that look?
         self.syncing = False
         self.sync_again = False
         self.downloads = {}           # document → percent
@@ -4522,10 +4528,17 @@ class Main(QtWidgets.QMainWindow):
         lines = QtWidgets.QVBoxLayout()
         lines.setSpacing(1)
         self.scanner_line = Clickable("", "dim")          # the scanner
-        self.scanner_line.clicked.connect(self.setup)
+        self.scanner_line.clicked.connect(self.pick_scanner)
         self.status = Clickable("", "dim")                # the sync
         self.status.clicked.connect(lambda: self.sync() if self.configured() else self.setup())
-        lines.addWidget(self.scanner_line)
+        self.again = Clickable("↻", "again")              # which scanners are there, now
+        self.again.setToolTip(_("look again"))
+        self.again.clicked.connect(self.find_scanner)
+        first = QtWidgets.QHBoxLayout()
+        first.setSpacing(0)
+        first.addWidget(self.scanner_line, 1)
+        first.addWidget(self.again, 0)
+        lines.addLayout(first)
         lines.addWidget(self.status)
         bottom.addLayout(lines, 1)
         self.gear = Clickable("⚙", "gear")
@@ -4631,7 +4644,7 @@ class Main(QtWidgets.QMainWindow):
         self.update_status()
         if self.configured():
             QtCore.QTimer.singleShot(0, self.sync)
-        QtCore.QTimer.singleShot(0, self.find_scanner)     # the same scanner may be at another address today
+        QtCore.QTimer.singleShot(0, self.find_scanner)     # the scanners of this place, today: another one, or the same at another address
 
     def configured(self):
         return bool(self.cfg.get("server"))
@@ -4654,6 +4667,7 @@ class Main(QtWidgets.QMainWindow):
             QLabel#big {{ font-size: {s + 9}pt; }}
             QLabel#more {{ font-size: {s + 5}pt; padding: 0 6px; }}
             QLabel#gear {{ color: {dim}; font-size: {s + 3}pt; padding: 0 2px 0 8px; }}
+            QLabel#again {{ color: {dim}; font-size: {s + 1}pt; padding: 0 2px 0 8px; }}
             QCheckBox {{ spacing: 8px; }}
             QLabel#choice {{ color: {dim}; padding: 2px 0; }}
             QLabel#choice:hover, QLabel#action:hover, QLabel#dimlink:hover, QLabel#tool:hover {{ color: {fg}; }}
@@ -5333,27 +5347,88 @@ class Main(QtWidgets.QMainWindow):
     # ---- scanning ----------------------------------------------------------------------
 
     def find_scanner(self):
-        """At every start, in the background: the quick look (a moment for a scanner that answers
-        by itself; NAPS2 asked only when none does). The scanner that answers takes the place of
-        the one remembered — the same model in another place has another address, and the app
-        would otherwise learn it at the first scan, after a failure. None answers: what was
-        remembered stays. The « scan » button is not held: a scan meanwhile keeps its own account
-        of the ways, and writes it after this one."""
+        """At every start, in the background, and when « ↻ » is pressed: which scanners are there.
+        First the quick look (a moment for the scanners that answer by themselves), shown at once;
+        then, when some answered and NAPS2 is there, its ways too (ten seconds and more), for a
+        scanner that only a driver knows. The scanner that answers takes the place of the one
+        remembered — the same model in another place has another address, and the app would
+        otherwise learn it at the first scan, after a failure. None answers: what was remembered
+        stays. The « scan » button is not held: a scan meanwhile keeps its own account of the
+        ways, and the look leaves it alone."""
         if self.searching:
             return
         self.searching = True
         self.update_status()
         naps2 = self.naps2
 
-        def found(devices):
-            self.searching = False
-            device = found_again(self.cfg.get("device"), devices, naps2.asked_all)
+        def work(say):
+            quick = naps2.devices(every=False)
+            if naps2.asked_all or not naps2.cmd:
+                return quick, naps2.asked_all
+            say(quick)
+            return naps2.devices(), naps2.asked_all
+
+        def seen(devices, asked_all):
+            self.found, self.found_all = devices, asked_all
+            device = None if self.scanning else found_again(self.cfg.get("device"), devices, asked_all)
             if device:
                 self.cfg["device"] = device
                 save_config(self.cfg)
+
+        def found(result):
+            self.searching = False
+            seen(*result)
             self.update_status()
 
-        self.run(lambda say: naps2.devices(every=False), found, lambda m: found([]))
+        def first(devices):
+            seen(devices, False)
+            self.update_status()
+
+        self.run(work, found, lambda m: found(([], False)), first)
+
+    def scanners_found(self):
+        """One line per scanner seen at the last look: (key, uuid, name). Two scanners of the
+        same model are told apart by their UUID, and named with their address."""
+        lines = []
+        for key in dict.fromkeys(d["key"] for d in self.found or []):
+            ways = [d for d in self.found if d["key"] == key]
+            name = re.sub(r"\s+\([^()]*\)$", "", ways[0]["name"])
+            uuids = list(dict.fromkeys(d["uuid"] for d in ways if d.get("uuid")))
+            if len(uuids) < 2:
+                lines.append((key, None, name))
+            else:
+                for u in uuids:
+                    url = next(d["url"] for d in ways if d.get("uuid") == u)
+                    lines.append((key, u, f"{name} · {urlparse(url).hostname}"))
+        return lines
+
+    def scanner_in_use(self, key, uuid):
+        device = self.cfg.get("device") or {}
+        return device.get("key") == key and (uuid is None or any(r.get("uuid") == uuid for r in device.get("routes") or []))
+
+    def use_scanner(self, key, uuid=None):
+        """The scanner chosen among those found becomes the one scanned with."""
+        ways = [d for d in self.found or [] if d["key"] == key and (uuid is None or d.get("uuid") == uuid)]
+        before = self.cfg.get("device") if self.scanner_in_use(key, uuid) else None
+        device = found_again(before, [dict(d) for d in ways], self.found_all)
+        if device:
+            self.cfg["device"] = device
+            save_config(self.cfg)
+            self.update_status()
+
+    def pick_scanner(self):
+        m = QtWidgets.QMenu(self)
+        scanners = self.scanners_found()
+        for key, uuid, name in scanners:
+            a = m.addAction(("● " if self.scanner_in_use(key, uuid) else "○ ") + name)
+            a.triggered.connect(lambda _c=False, k=key, u=uuid: self.use_scanner(k, u))
+        if not scanners:
+            m.addAction(_("looking…") if self.searching else _("none found — is the scanner switched on?")).setEnabled(False)
+        m.addSeparator()
+        again = m.addAction(_("looking…") if self.searching else _("look again"))
+        again.setEnabled(not self.searching)
+        again.triggered.connect(lambda _c=False: self.find_scanner())
+        m.exec_(QtGui.QCursor.pos())
 
     def scan(self):
         if self.scanning:
@@ -5748,11 +5823,12 @@ class Main(QtWidgets.QMainWindow):
         if self.searching and not device:      # a scanner remembered keeps its name while it is looked for again
             scanner = _("looking for the scanner…")
         elif device:
-            scanner = re.sub(r"\s+\([^()]*\)$", "", device)
+            scanner = re.sub(r"\s+\([^()]*\)$", "", device) + " ▾"
         elif LOCAL_NETWORK["refused"]:
             scanner = error_text("localnet")
         else:
             scanner = _("no scanner found yet")
+        self.again.setText("…" if self.searching else "↻")
         if getattr(self, "trouble", ""):
             sync = self.trouble
         elif self.syncing:

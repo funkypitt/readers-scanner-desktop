@@ -24,7 +24,8 @@ no account with the app, nothing leaves your computer except to your own WebDAV 
 - **Nothing to set up for a scan, and nothing to choose.** The scanner is found by itself and
   remembered; of the ways to reach it, the app takes the best one that answers — the scanner
   itself before any driver, the cable before the network — and the next one when it stops
-  answering. « automatic » takes the feeder when sheets are in it, the glass otherwise. 300 dpi colour, straightened.
+  answering. The scanners are looked for at every start, and again with « ↻ » beside the
+  scanner's name; with several of them, a click on that name chooses. « automatic » takes the feeder when sheets are in it, the glass otherwise. 300 dpi colour, straightened.
   From the feeder, blank sheets and blank backs are left out (and can be put back); sheets fed upside down
   are set upright.
 - **The text is read on this computer** (Tesseract), in the language chosen under the button;

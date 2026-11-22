@@ -32,7 +32,7 @@ from PIL import Image
 from PyQt5 import QtCore, QtGui, QtWidgets
 
 APP = "readers-scanner"
-VERSION = "1.2.2"
+VERSION = "1.3.0"
 Image.MAX_IMAGE_PIXELS = 200_000_000      # an A3 page at 600 dpi is not an attack
 
 

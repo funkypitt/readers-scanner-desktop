@@ -319,6 +319,8 @@ check("the same model elsewhere (another UUID, another address): it takes the pl
 again = rs.found_again(home, [hp("http://10.0.0.7:80", "B"), hp("http://10.0.0.8:80", "A")])
 check("two of the model answer: the one remembered, by its UUID", [x["uuid"] for x in again["routes"] if x.get("uuid")] == ["A"], str(again))
 other = dict(hp("http://10.0.0.9:80", "C"), name="Brother MFC-J6955DW", key="mfcj6955dw")
+again = rs.found_again(dict(home, routes=[hp("http://192.168.1.120:80", "Z")]), [hp("http://10.0.0.7:80", "B"), hp("http://10.0.0.8:80", "A")])
+check("two of that model answer, neither the one remembered: one of them, not a mix of both", [r["url"] for r in again["routes"]] == ["http://10.0.0.7:80"], str(again))
 again = rs.found_again(home, [other, hp("http://10.0.0.8:80", "A")])
 check("two scanners answer: the one remembered rather than the first found", again["key"] == "scanjetpro4500fn1" and again["name"] == "HP ScanJet Pro 4500 fn1", str(again))
 again = rs.found_again(home, [other])

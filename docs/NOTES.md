@@ -337,3 +337,25 @@ home, no LANG, the Finder's PATH):
   window's language.
 - CI runs the built app's `--self-test` once more as the Finder would start it
   (`env -i`, an empty home, `PATH=/usr/bin:/bin:/usr/sbin:/sbin`).
+
+## 1.3.0 (2026-11-22): several scanners in one place
+
+Asked by the user for a laptop that meets two different scanners, on the network or by USB.
+Since 1.2.1 the scanner was looked for at every start, but only one was ever shown, and « look
+again » and the choice between two sat in the settings.
+
+- **« ↻ » beside the scanner's name**, one click from the main window: the same look as at the
+  start (`Main.find_scanner`); it reads « … » while the look runs.
+- **A click on the scanner's name** lists the scanners found (`scanners_found`, one line per
+  scanner, the one in use marked) and chooses another (`use_scanner`); the name carries « ▾ ».
+  The settings' list starts from the same look when it was a complete one.
+- **The look has two steps in one job.** The quick one as before (3 s, the time zeroconf
+  listens), applied at once; then, when a scanner answered by itself and NAPS2 is there, every
+  way, for a scanner only a driver knows (a second scanner on USB without ipp-usb, Windows and
+  macOS on USB). Measured here: a Brother MFC-J6955DW on the network usable after 3.1 s, the
+  look over after 17 s. `Main.found` holds every way seen, `found_all` whether NAPS2 was asked.
+  While a scan runs the look changes nothing: the scan writes its own account.
+- **Two scanners of the same model** answering together, neither the one remembered:
+  `found_again` took the ways of both for one scanner. It now takes one of them; the list shows
+  them on two lines, told apart by their UUID and named with their address.
+

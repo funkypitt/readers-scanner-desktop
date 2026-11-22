@@ -60,7 +60,7 @@ ADF = """<scan:Adf>
 DPI = "".join(f"<scan:DiscreteResolution><scan:XResolution>{d}</scan:XResolution><scan:YResolution>{d}</scan:YResolution></scan:DiscreteResolution>" for d in (75, 150, 200, 300, 600))
 
 
-def serve(root, port=0):
+def serve(root, port=0, model=None, uuid=None):
     jobs = {}                  # number → {"pages": [...], "feeder": bool, "dpi": int}
     state = {"n": 14}
 
@@ -99,7 +99,12 @@ def serve(root, port=0):
             self.note("GET " + self.path)
             if self.path == "/eSCL/ScannerCapabilities":
                 adf = "" if os.path.exists(here("nofeeder")) else ADF % {"dpi": DPI}
-                return self.answer(200, (CAPS % {"dpi": DPI, "adf": adf}).encode())
+                caps = CAPS % {"dpi": DPI, "adf": adf}
+                if model:              # another scanner than the HP
+                    caps = caps.replace("HP ScanJet Pro 4500 fn1", model)
+                if model or uuid:
+                    caps = caps.replace("FAKE00000001", uuid or "FAKE" + "%08d" % (sum(model.encode()) % 10 ** 8))
+                return self.answer(200, caps.encode())
             if self.path == "/eSCL/ScannerStatus":
                 adf = ("ScannerAdfJam" if os.path.exists(here("jam")) else "ScannerAdfMultipickDetected" if os.path.exists(here("multipick"))
                        else "ScannerAdfLoaded" if sheets() else "ScannerAdfEmpty")

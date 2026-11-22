@@ -819,7 +819,7 @@ class SettingsDialog(QtWidgets.QDialog):
         self.again.clicked.connect(self.look_again)
         row = QtWidgets.QHBoxLayout(); row.addWidget(self.scanner, 1); row.addWidget(self.again)
         form.addRow(_("scanner"), row)
-        self.devices = None
+        self.devices = main.found if main.found_all or not main.naps2.cmd else None     # what the window saw, when it saw everything
         self.fill_scanners()
         naps = main.naps2
         self.naps = QtWidgets.QLabel(_("NAPS2 %1 is here, for the scanners that do not answer by themselves", naps.version) if naps.cmd else
@@ -890,7 +890,8 @@ class SettingsDialog(QtWidgets.QDialog):
         self.main.run(lambda note: self.main.naps2.devices(), self.found, lambda m: self.found([]))
 
     def found(self, devices):
-        self.devices = devices
+        self.devices = self.main.found = devices
+        self.main.found_all = self.main.naps2.asked_all
         self.again.setEnabled(True)
         self.again.setText(_("look again"))
         self.fill_scanners()

@@ -125,7 +125,7 @@ QtGui.QDesktopServices.openUrl = staticmethod(lambda url: opened.append(url.toLo
 scanner(feeder=["facture-1.jpg", "facture-2.jpg"])
 w = rs.Main(); w.resize(1180, 800); w.show()
 check("first start: the welcome, the folders", w.stack.currentWidget() is w.message and [r[0] for r in rows(w)] == ["all", "new"], str(rows(w)))
-check("the scanner is found by itself", wait(lambda: (w.cfg.get("device") or {}).get("name", "").startswith("HP ScanJet"), 20) and w.scanner_line.text() == "HP ScanJet Pro 4500 fn1", w.scanner_line.text())
+check("the scanner is found by itself", wait(lambda: (w.cfg.get("device") or {}).get("name", "").startswith("HP ScanJet"), 20) and w.scanner_line.text() == "HP ScanJet Pro 4500 fn1 ▾", w.scanner_line.text())
 shot(w, "01-first-start")
 expected = {"fr": "fra", "de": "deu", "es": "spa", "pt": "por", "ru": "rus", "en": "eng"}[LANG[:2]]
 check("the text is read in the system's language unless told otherwise", w.cfg["lang"] == expected, w.cfg["lang"])
@@ -329,12 +329,12 @@ w.cfg.pop("device", None)
 t0 = time.time()
 w.find_scanner()
 check("found by itself, in a moment, without NAPS2", wait(lambda: (w.cfg.get("device") or {}).get("routes", [{}])[0].get("backend") == "direct", 10) and time.time() - t0 < 3
-      and w.scanner_line.text() == "HP ScanJet Pro 4500 fn1" and w.naps2.cmd is None, f"{w.scanner_line.text()} {time.time() - t0:.1f} s")
+      and w.scanner_line.text() == "HP ScanJet Pro 4500 fn1 ▾" and w.naps2.cmd is None, f"{w.scanner_line.text()} {time.time() - t0:.1f} s")
 # the same model in another place: remembered at an address that no longer answers
 w.cfg["device"] = {"key": w.cfg["device"]["key"], "name": "HP ScanJet Pro 4500 fn1", "routes": [dict(w.cfg["device"]["routes"][0], id="http://localhost:9", url="http://localhost:9", uuid="FAKE-ELSEWHERE")]}
 w.update_status()
 w.find_scanner()
-check("looked for again at the start: the name stays on the status line meanwhile", w.searching and w.scanner_line.text() == "HP ScanJet Pro 4500 fn1", w.scanner_line.text())
+check("looked for again at the start: the name stays on the status line meanwhile", w.searching and w.scanner_line.text() == "HP ScanJet Pro 4500 fn1 ▾", w.scanner_line.text())
 check("the scanner that answers takes the place of the one remembered elsewhere", wait(lambda: not w.searching, 10) and w.cfg["device"]["routes"][0]["url"] == direct and len(w.cfg["device"]["routes"]) == 1, str(w.cfg["device"]))
 scanner(feeder=["facture-1.jpg", "facture-2.jpg"])
 w.cfg["source"] = "auto"; w.show_choices()
@@ -356,6 +356,37 @@ w.cfg.pop("device", None)
 scanner()
 w.find_scanner(); wait(lambda: not w.searching and w.cfg.get("device"), 20)
 
+# ---- 7c. several scanners in this place: looked for at every start, one click to look again ------
+SC2 = TMP + "/scanner2"; os.makedirs(SC2)
+one, stop_one = fake_escl.serve(SC)
+two, stop_two = fake_escl.serve(SC2, model="Brother MFC-J6955DW")
+twin, stop_twin = fake_escl.serve(SC2, uuid="FAKE-TWIN")
+os.environ["READERS_SCANNER_DIRECT"] = f"{one},{two}"
+w.cfg["device"] = rs.found_again(None, [rs.escl_probe(one)])
+rs.save_config(w.cfg)
+w2 = rs.Main(); w2.resize(1180, 800); w2.show()
+check("at the start, a scanner already known: looked for all the same, both found, NAPS2's ways too", wait(lambda: not w2.searching and w2.found is not None, 30) and w2.found_all
+      and [n for k, u, n in w2.scanners_found()] == ["HP ScanJet Pro 4500 fn1", "Brother MFC-J6955DW"] and w2.cfg["device"]["routes"][0].get("url") == one, str(w2.scanners_found()))
+w2.use_scanner(*w2.scanners_found()[1][:2])
+check("the other one chosen: named on the line, kept", w2.scanner_line.text() == "Brother MFC-J6955DW ▾" and rs.load_config()["device"]["routes"][0]["url"] == two
+      and [w2.scanner_in_use(k, u) for k, u, n in w2.scanners_found()] == [False, True], w2.scanner_line.text())
+shot(w2, "12c-two-scanners")
+stop_two()
+os.environ["READERS_SCANNER_DIRECT"] = f"{one},{twin}"
+click(w2.again)
+check("« ↻ », one click: the one switched off is gone, another one is taken", w2.searching and w2.again.text() == "…" and wait(lambda: not w2.searching, 30) and w2.again.text() == "↻"
+      and w2.scanner_line.text() == "HP ScanJet Pro 4500 fn1 ▾" and w2.cfg["device"]["routes"][0]["url"] == one, w2.scanner_line.text())
+lines = w2.scanners_found()
+check("two scanners of the same model: two lines, told apart by their address", len(lines) == 2 and lines[0][1] != lines[1][1] and all("·" in n for k, u, n in lines)
+      and [w2.scanner_in_use(k, u) for k, u, n in lines] == [True, False], str(lines))
+w2.use_scanner(*lines[1][:2])
+check("the twin chosen: its address, a clean slate", w2.cfg["device"]["routes"][0]["url"] == twin and [w2.scanner_in_use(k, u) for k, u, n in lines] == [False, True], str(w2.cfg["device"]))
+stop_one(); stop_twin()
+os.environ["READERS_SCANNER_DIRECT"] = ""
+w2.quitting = True; w2.close()
+w.cfg = rs.load_config(); w.cfg.pop("device", None)
+w.find_scanner(); wait(lambda: not w.searching and w.cfg.get("device"), 20)
+
 # ---- 8. the look of the app -----------------------------------------------------------------
 w.open_doc(doc1); wait(lambda: all(p.image is not None for p in w.pages.pictures), 10)
 w.toggle_theme(); wait(lambda: all(p.image is not None for p in w.pages.pictures), 10)
@@ -371,7 +402,7 @@ check("an old config with « dark » alone still means the ink it said", rs.them
 dlg = rs.SettingsDialog(w); dlg.show(); settle(300)
 dlg.grab().save(f"{SHOTS}/14-settings.png")
 dlg.look_again()
-check("settings: « look again » lists the scanner", wait(lambda: dlg.devices is not None, 20) and dlg.scanner.count() == 1 and "ScanJet" in dlg.scanner.currentText(), dlg.scanner.currentText())
+check("settings: « look again » lists the scanner", wait(lambda: dlg.again.isEnabled(), 20) and dlg.scanner.count() == 1 and "ScanJet" in dlg.scanner.currentText(), dlg.scanner.currentText())
 dlg.close()
 
 # ---- 8b. with the phone (when wsgidav is there to play the server) ----------------------------
